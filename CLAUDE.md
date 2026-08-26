@@ -5,9 +5,9 @@ dashboard. Sibling project to Palabritas (`C:\Users\brian\Desktop\Spelling`) and
 deliberately follows the same shape: vanilla HTML/CSS/JS, no build step, no
 dependencies, GitHub Pages, Add to Home Screen.
 
-- **Quiz:** https://gwallee.github.io/math-facts/
-- **Dashboard:** https://gwallee.github.io/math-facts/dashboard.html
-- **Repo:** https://github.com/gwallee/math-facts (public)
+- **Quiz:** https://gwallee.github.io/MathFacts/
+- **Dashboard:** https://gwallee.github.io/MathFacts/dashboard.html
+- **Repo:** https://github.com/gwallee/MathFacts (public)
 
 ## Architecture
 

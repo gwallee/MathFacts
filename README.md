@@ -2,8 +2,8 @@
 
 Timed multiplication practice for Caleb, plus a parent dashboard.
 
-- **Quiz (Caleb's phone):** https://gwallee.github.io/math-facts/
-- **Dashboard (your phone):** https://gwallee.github.io/math-facts/dashboard.html
+- **Quiz (Caleb's phone):** https://gwallee.github.io/MathFacts/
+- **Dashboard (your phone):** https://gwallee.github.io/MathFacts/dashboard.html
 
 No accounts and no login anywhere. Results go to a private Google Sheet through a
 Google Apps Script web app, which also pushes a notification to your phone via
@@ -89,7 +89,7 @@ line commented.
 
 On his phone, in **Safari** (not Chrome — only Safari can install to the home screen):
 
-1. Go to https://gwallee.github.io/math-facts/
+1. Go to https://gwallee.github.io/MathFacts/
 2. Tap the **Share** button (square with an up arrow).
 3. **Add to Home Screen** → name it `Math Facts` → **Add**.
 
@@ -98,7 +98,7 @@ bar, and works offline.
 
 ### 6. Bookmark the dashboard on your phone
 
-Open https://gwallee.github.io/math-facts/dashboard.html and add it to your home
+Open https://gwallee.github.io/MathFacts/dashboard.html and add it to your home
 screen the same way, or just bookmark it. There is no login — the URL is the only
 thing protecting it, which is fine for multiplication scores.
 
