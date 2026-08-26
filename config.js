@@ -21,7 +21,7 @@ window.MATH_CONFIG = {
   // The Apps Script web app address. Paste the URL that ends in /exec
   // between the quotes. Until you do, the quiz still works but cannot
   // send scores and cannot pick up dashboard settings.
-  SCRIPT_URL: '',
+  SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyfRXckmyLa3X-2yskiLYY0mdN1k-O3mi579G2AsOMwuLD2cHHw8fbW6I19DfmthMwEUw/exec',
 
 
   /* --- who practises ---------------------------------------------- */
