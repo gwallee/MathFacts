@@ -89,6 +89,15 @@ git push origin main && git push origin main:gh-pages
 
 - In Claude Code shells set `$env:GCM_INTERACTIVE = 'auto'` first, or the credential
   helper refuses to prompt.
+- **Pushing is non-interactive; creating a repo is not.** Git Credential Manager has a
+  GitHub token cached in Windows Credential Manager, so `git push` to an existing repo
+  needs no prompt. The `gh` CLI is *not* installed, so a brand-new repo has to be
+  created by Brian at github.com/new (that is why `MathFacts` is CamelCase and not the
+  `math-facts` the first draft assumed). Note PowerShell wraps git's stderr as a
+  scary-looking `NativeCommandError` even on a successful push — check the actual
+  output lines, not the exception.
+- Pages auto-enabled itself the moment `gh-pages` was first pushed; it took about
+  40 seconds to go from 404 to 200.
 - Remember the `sw.js` CACHE bump.
 - Editing the Apps Script requires **Deploy → Manage deployments → New version**, or
   the phones keep running the old code at the same URL.
@@ -106,7 +115,9 @@ git push origin main && git push origin main:gh-pages
 
 ## State / history
 
-- v1.0.0 (2026-08-26, current): initial build — quiz, Apps Script, dashboard.
+- v1.0.0 (2026-08-26, current): initial build — quiz, Apps Script, dashboard. Live on
+  Pages the same day. Brian still has to do the Google/ntfy setup in README steps 1–4
+  before scores actually go anywhere; `SCRIPT_URL` in `config.js` is still `''`.
 - Originally requested as copy-paste code blocks; Brian corrected that mid-build and
   asked for a real app pushed to GitHub like Palabritas.
 - No known open bugs. Not requested, do not add unless asked: adaptive/weighted
