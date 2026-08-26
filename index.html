@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Math Facts">
+<meta name="theme-color" content="#0b1220">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<title>Math Facts</title>
+
+<!-- Every setting for this app lives in config.js — not in this file. -->
+<script src="config.js"></script>
+
+<style>
+  :root{
+    --bg:#0b1220; --card:#161f36; --ink:#f3f6ff; --muted:#9fb0d0;
+    --accent:#4f9cff; --good:#31c48d; --bad:#f96a6a;
+    --pad:#233150; --pad-press:#31446e;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-user-select:none; user-select:none; touch-action:manipulation;
+    overflow:hidden;
+  }
+  .screen{
+    display:none; flex-direction:column; height:100dvh;
+    padding:max(14px,env(safe-area-inset-top)) 14px max(14px,env(safe-area-inset-bottom));
+  }
+  .screen.on{display:flex}
+
+  /* ---------------- start ---------------- */
+  #screen-start{align-items:center;justify-content:center;text-align:center;gap:8px}
+  .hello{font-size:32px;font-weight:800}
+  .sub{color:var(--muted);font-size:16px;line-height:1.6}
+  .big-btn{
+    margin-top:22px;border:0;border-radius:22px;padding:22px 56px;
+    font-size:28px;font-weight:800;color:#04121f;
+    background:linear-gradient(180deg,#63b0ff,#2b7fe0);box-shadow:0 8px 0 #1a5aa8;
+  }
+  .big-btn:active{transform:translateY(4px);box-shadow:0 4px 0 #1a5aa8}
+  .note{margin-top:18px;font-size:13px;color:var(--muted);max-width:300px;line-height:1.5}
+
+  /* ---------------- play ----------------- */
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .counter{font-size:16px;font-weight:700;color:var(--muted);min-width:64px}
+  .scorepill{
+    font-size:15px;font-weight:800;background:var(--card);
+    padding:6px 14px;border-radius:999px;color:var(--good);min-width:44px;text-align:center;
+  }
+  .progress{height:6px;background:var(--card);border-radius:99px;margin-top:10px;overflow:hidden}
+  .progress > i{display:block;height:100%;background:var(--accent);width:0;transition:width .25s}
+
+  .stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+  .ring{position:relative;width:74px;height:74px;flex:none}
+  .ring svg{transform:rotate(-90deg)}
+  .ring .num{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:26px;font-weight:800;
+  }
+  .problem{font-size:clamp(50px,17vw,86px);font-weight:800;letter-spacing:2px;line-height:1.1}
+  .answer{
+    min-width:180px;text-align:center;font-size:48px;font-weight:800;
+    border-bottom:5px solid var(--pad);padding:2px 14px 8px;min-height:68px;
+  }
+  .answer.ok{border-color:var(--good);color:var(--good)}
+  .answer.no{border-color:var(--bad);color:var(--bad)}
+  .verdict{height:28px;font-size:20px;font-weight:700;color:var(--muted)}
+  .verdict.ok{color:var(--good)}
+  .verdict.no{color:var(--bad)}
+
+  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding-top:6px}
+  .key{
+    border:0;border-radius:16px;background:var(--pad);color:var(--ink);
+    font-size:30px;font-weight:800;padding:18px 0;min-height:62px;
+  }
+  .key:active{background:var(--pad-press)}
+  .key.go{background:var(--good);color:#04211a}
+  .key.del{background:#3a2740;color:#ffd7d7;font-size:24px}
+
+  /* ---------------- done ----------------- */
+  #screen-done{overflow-y:auto;gap:2px;-webkit-overflow-scrolling:touch}
+  .result{text-align:center;padding-top:6px}
+  .result .score{font-size:66px;font-weight:800;line-height:1}
+  .result .of{color:var(--muted);font-size:18px;font-weight:700}
+  .stats{display:flex;gap:10px;margin-top:14px}
+  .stat{flex:1;background:var(--card);border-radius:14px;padding:12px;text-align:center}
+  .stat b{display:block;font-size:22px}
+  .stat span{font-size:12px;color:var(--muted)}
+  h2{font-size:15px;margin:20px 0 8px;color:var(--muted);font-weight:700}
+  .miss{
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:var(--card);border-radius:12px;padding:12px 14px;margin-bottom:8px;
+  }
+  .miss .fact{font-size:20px;font-weight:800;white-space:nowrap}
+  .miss .said{font-size:13px;color:var(--muted);text-align:right}
+  .miss .said b{color:var(--bad)}
+  .perfect{background:var(--card);border-radius:14px;padding:20px;text-align:center;font-size:18px}
+  .status{border-radius:14px;padding:14px;font-size:15px;line-height:1.5;margin-top:18px}
+  .status.sending{background:#1b2540;color:var(--muted)}
+  .status.sent{background:#11331f;color:#8ff0c4}
+  .status.failed{background:#3a1c1c;color:#ffc9c9}
+  .again{
+    margin:14px 0 6px;width:100%;border:0;border-radius:18px;padding:18px;
+    font-size:20px;font-weight:800;background:var(--pad);color:var(--ink);
+  }
+  .retry{
+    margin-top:10px;border:0;border-radius:12px;padding:10px 18px;
+    font-size:14px;font-weight:700;background:#5a2b2b;color:#ffdada;
+  }
+</style>
+</head>
+<body>
+
+<!-- ======================= START ======================= -->
+<section id="screen-start" class="screen on">
+  <div class="hello" id="greeting">Math Facts</div>
+  <div class="sub" id="startBlurb"></div>
+  <button class="big-btn" id="startBtn">Start</button>
+  <div class="note" id="pendingNote" hidden></div>
+</section>
+
+<!-- ======================== PLAY ======================== -->
+<section id="screen-play" class="screen">
+  <div>
+    <div class="topbar">
+      <div class="counter" id="counter">1 / 20</div>
+      <div class="ring">
+        <svg width="74" height="74" viewBox="0 0 74 74" aria-hidden="true">
+          <circle cx="37" cy="37" r="32" fill="none" stroke="#233150" stroke-width="7"></circle>
+          <circle id="ringArc" cx="37" cy="37" r="32" fill="none" stroke="#4f9cff"
+                  stroke-width="7" stroke-linecap="round"
+                  stroke-dasharray="201.06" stroke-dashoffset="0"></circle>
+        </svg>
+        <div class="num" id="ringNum">8</div>
+      </div>
+      <div class="scorepill" id="scorePill">0</div>
+    </div>
+    <div class="progress"><i id="progressBar"></i></div>
+  </div>
+
+  <div class="stage">
+    <div class="problem" id="problem">7 &times; 8</div>
+    <div class="answer" id="answer"></div>
+    <div class="verdict" id="verdict"></div>
+  </div>
+
+  <div class="pad" id="pad">
+    <button class="key" data-k="1">1</button>
+    <button class="key" data-k="2">2</button>
+    <button class="key" data-k="3">3</button>
+    <button class="key" data-k="4">4</button>
+    <button class="key" data-k="5">5</button>
+    <button class="key" data-k="6">6</button>
+    <button class="key" data-k="7">7</button>
+    <button class="key" data-k="8">8</button>
+    <button class="key" data-k="9">9</button>
+    <button class="key del" data-k="del" aria-label="delete">&#9003;</button>
+    <button class="key" data-k="0">0</button>
+    <button class="key go" data-k="go" aria-label="enter">&#10003;</button>
+  </div>
+</section>
+
+<!-- ======================== DONE ======================== -->
+<section id="screen-done" class="screen">
+  <div class="result">
+    <div class="score" id="finalScore">0</div>
+    <div class="of" id="finalOf">out of 20</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="statAcc">—</b><span>accuracy</span></div>
+    <div class="stat"><b id="statTime">—</b><span>total time</span></div>
+    <div class="stat"><b id="statAvg">—</b><span>per problem</span></div>
+  </div>
+
+  <h2 id="missedHeading">Missed facts</h2>
+  <div id="missedList"></div>
+
+  <div class="status sending" id="sendStatus">Sending your score&hellip;</div>
+  <button class="retry" id="retryBtn" hidden>Try sending again</button>
+
+  <button class="again" id="againBtn">Practice again</button>
+</section>
+
+<script>
+/* ------------------------------------------------------------------
+   Settings come from config.js (window.MATH_CONFIG). The defaults
+   below are only a safety net if that file fails to load.
+   ------------------------------------------------------------------ */
+var DEFAULTS = {
+  SCRIPT_URL: '',
+  STUDENT_NAME: 'Caleb',
+  MIN_FACTOR: 3,
+  MAX_FACTOR: 12,
+  PROBLEMS_PER_SESSION: 20,
+  SECONDS_PER_PROBLEM: 8,
+  SHOW_CORRECT_ON_MISS: true,
+  FEEDBACK_MS_CORRECT: 450,
+  FEEDBACK_MS_WRONG: 1700,
+  MAX_ANSWER_DIGITS: 3,
+  AVOID_IMMEDIATE_REPEAT: true,
+  KEEP_SCREEN_AWAKE: true,
+  SEND_TIMEOUT_MS: 12000
+};
+
+var CONFIG = (function () {
+  var out = {};
+  var src = window.MATH_CONFIG || {};
+  for (var k in DEFAULTS) {
+    if (Object.prototype.hasOwnProperty.call(DEFAULTS, k)) {
+      out[k] = (src[k] === undefined || src[k] === null || src[k] === '') ? DEFAULTS[k] : src[k];
+    }
+  }
+  if (src.SCRIPT_URL) out.SCRIPT_URL = src.SCRIPT_URL;
+  return out;
+})();
+
+var PENDING_KEY = 'mathfacts_pending_v1';
+var RING_C = 201.06;              // 2·π·r for r = 32, matching the SVG above
+
+var S = null;                     // live session state
+var rafId = null;
+var wakeLock = null;
+var acceptingInput = false;
+
+function el(id) { return document.getElementById(id); }
+
+/* --------------------------- helpers --------------------------- */
+
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function mmss(sec) {
+  var t = Math.max(0, Math.round(sec));
+  var m = Math.floor(t / 60);
+  var s = t % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function show(id) {
+  var all = document.querySelectorAll('.screen');
+  for (var i = 0; i < all.length; i++) all[i].classList.remove('on');
+  el(id).classList.add('on');
+}
+
+function urlLooksSet() {
+  return typeof CONFIG.SCRIPT_URL === 'string' &&
+         CONFIG.SCRIPT_URL.indexOf('http') === 0;
+}
+
+/* ---------------------- problem generation --------------------- */
+/* Purely random. Misses are logged for the dashboard, never re-asked. */
+
+function makeProblems(n) {
+  var out = [];
+  var prevKey = '';
+  for (var i = 0; i < n; i++) {
+    var a, b, key, guard = 0;
+    do {
+      a = randInt(CONFIG.MIN_FACTOR, CONFIG.MAX_FACTOR);
+      b = randInt(CONFIG.MIN_FACTOR, CONFIG.MAX_FACTOR);
+      key = a + 'x' + b;
+      guard++;
+    } while (CONFIG.AVOID_IMMEDIATE_REPEAT && key === prevKey && guard < 25);
+    prevKey = key;
+    out.push({ a: a, b: b });
+  }
+  return out;
+}
+
+/* ----------------------------- play ---------------------------- */
+
+function startSession() {
+  S = {
+    problems: makeProblems(CONFIG.PROBLEMS_PER_SESSION),
+    index: 0,
+    score: 0,
+    missed: [],
+    typed: '',
+    deadline: 0,
+    startedAt: Date.now()
+  };
+  requestWakeLock();
+  show('screen-play');
+  nextProblem();
+}
+
+function nextProblem() {
+  if (S.index >= S.problems.length) { finishSession(); return; }
+
+  var p = S.problems[S.index];
+  S.typed = '';
+
+  el('counter').textContent = (S.index + 1) + ' / ' + S.problems.length;
+  el('scorePill').textContent = S.score;
+  el('progressBar').style.width = ((S.index / S.problems.length) * 100) + '%';
+  el('problem').innerHTML = p.a + ' &times; ' + p.b;
+  el('answer').textContent = '';
+  el('answer').className = 'answer';
+  el('verdict').textContent = '';
+  el('verdict').className = 'verdict';
+
+  S.deadline = performance.now() + CONFIG.SECONDS_PER_PROBLEM * 1000;
+  acceptingInput = true;
+  tick();
+}
+
+function tick() {
+  var left = S.deadline - performance.now();
+  var span = CONFIG.SECONDS_PER_PROBLEM * 1000;
+  var frac = Math.max(0, Math.min(1, left / span));
+
+  var arc = el('ringArc');
+  arc.setAttribute('stroke-dashoffset', String(RING_C * (1 - frac)));
+  arc.setAttribute('stroke', frac > 0.5 ? '#4f9cff' : (frac > 0.25 ? '#f7b955' : '#f96a6a'));
+  el('ringNum').textContent = String(Math.max(0, Math.ceil(left / 1000)));
+
+  if (left <= 0) { resolveAnswer(true); return; }
+  rafId = requestAnimationFrame(tick);
+}
+
+function stopTimer() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+}
+
+function press(k) {
+  if (!acceptingInput) return;
+
+  if (k === 'del') {
+    S.typed = S.typed.slice(0, -1);
+  } else if (k === 'go') {
+    if (S.typed === '') return;
+    resolveAnswer(false);
+    return;
+  } else if (S.typed.length < CONFIG.MAX_ANSWER_DIGITS) {
+    if (S.typed === '0') S.typed = '';         // no leading zeros
+    S.typed += k;
+  }
+  el('answer').textContent = S.typed;
+}
+
+function resolveAnswer(timedOut) {
+  if (!acceptingInput) return;
+  acceptingInput = false;
+  stopTimer();
+
+  var p = S.problems[S.index];
+  var correct = p.a * p.b;
+  var given = timedOut ? '' : S.typed;
+  var isRight = !timedOut && Number(given) === correct;
+
+  if (isRight) {
+    S.score++;
+    el('answer').textContent = given;
+    el('answer').className = 'answer ok';
+    el('verdict').textContent = 'Yes!';
+    el('verdict').className = 'verdict ok';
+  } else {
+    S.missed.push({ a: p.a, b: p.b, given: given, timeout: !!timedOut });
+    el('answer').textContent = timedOut ? '—' : given;
+    el('answer').className = 'answer no';
+    el('verdict').textContent = CONFIG.SHOW_CORRECT_ON_MISS
+      ? (p.a + ' × ' + p.b + ' = ' + correct)
+      : (timedOut ? 'Out of time' : 'Not quite');
+    el('verdict').className = 'verdict no';
+  }
+
+  el('scorePill').textContent = S.score;
+  S.index++;
+
+  setTimeout(nextProblem, isRight ? CONFIG.FEEDBACK_MS_CORRECT : CONFIG.FEEDBACK_MS_WRONG);
+}
+
+/* ---------------------------- finish --------------------------- */
+
+function finishSession() {
+  stopTimer();
+  releaseWakeLock();
+
+  var elapsed = (Date.now() - S.startedAt) / 1000;
+  var total = S.problems.length;
+  var acc = total ? Math.round((100 * S.score) / total) : 0;
+
+  el('finalScore').textContent = S.score;
+  el('finalOf').textContent = 'out of ' + total;
+  el('statAcc').textContent = acc + '%';
+  el('statTime').textContent = mmss(elapsed);
+  el('statAvg').textContent = (total ? (elapsed / total).toFixed(1) : '0') + 's';
+
+  var list = el('missedList');
+  list.innerHTML = '';
+
+  if (S.missed.length === 0) {
+    el('missedHeading').textContent = 'Missed facts';
+    list.innerHTML = '<div class="perfect">Perfect round — nothing missed. 🎉</div>';
+  } else {
+    el('missedHeading').textContent = 'Missed facts (' + S.missed.length + ')';
+    for (var i = 0; i < S.missed.length; i++) {
+      var m = S.missed[i];
+      var said = m.timeout ? 'ran out of time'
+               : (m.given === '' ? 'left blank' : 'you said <b>' + m.given + '</b>');
+      var row = document.createElement('div');
+      row.className = 'miss';
+      row.innerHTML =
+        '<div class="fact">' + m.a + ' × ' + m.b + ' = ' + (m.a * m.b) + '</div>' +
+        '<div class="said">' + said + '</div>';
+      list.appendChild(row);
+    }
+  }
+
+  show('screen-done');
+
+  deliver({
+    student: CONFIG.STUDENT_NAME,
+    timestamp: new Date().toISOString(),
+    score: S.score,
+    total: total,
+    elapsedSeconds: Math.round(elapsed * 10) / 10,
+    missed: S.missed
+  }, false);
+}
+
+/* ------------------------ sending the result ------------------- */
+
+function setStatus(kind, html) {
+  var box = el('sendStatus');
+  box.className = 'status ' + kind;
+  box.innerHTML = html;
+  el('retryBtn').hidden = (kind !== 'failed');
+}
+
+function postSession(payload) {
+  // text/plain keeps this a "simple" cross-origin request, so the browser
+  // sends no OPTIONS preflight — an Apps Script web app cannot answer one.
+  var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var timer = controller
+    ? setTimeout(function () { controller.abort(); }, CONFIG.SEND_TIMEOUT_MS)
+    : null;
+
+  var opts = {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  };
+  if (controller) opts.signal = controller.signal;
+
+  return fetch(CONFIG.SCRIPT_URL, opts)
+    .then(function (res) { if (timer) clearTimeout(timer); return res.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) throw new Error((data && data.error) || 'rejected');
+      return data;
+    })
+    .catch(function (err) { if (timer) clearTimeout(timer); throw err; });
+}
+
+function deliver(payload, isRetry) {
+  if (!urlLooksSet()) {
+    queuePending(payload);
+    setStatus('failed',
+      'This app has no upload address set up yet.<br><b>Show this screen to a parent.</b>');
+    return;
+  }
+
+  setStatus('sending', isRetry ? 'Trying again…' : 'Sending your score…');
+
+  postSession(payload).then(function () {
+    dropPending(payload.timestamp);
+    setStatus('sent', 'Score sent to your parent. ✅');
+    flushPending();
+  }).catch(function () {
+    queuePending(payload);
+    setStatus('failed',
+      'Could not send your score right now.<br><b>Show this screen to a parent</b> ' +
+      'before you close it. It will send itself next time you open the app on wifi.');
+  });
+}
+
+/* --------- offline queue: nothing is lost if the POST fails ----- */
+
+function readPending() {
+  try {
+    var raw = localStorage.getItem(PENDING_KEY);
+    var arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+
+function writePending(arr) {
+  try { localStorage.setItem(PENDING_KEY, JSON.stringify(arr.slice(-30))); } catch (e) {}
+}
+
+function queuePending(payload) {
+  var arr = readPending();
+  for (var i = 0; i < arr.length; i++) {
+    if (arr[i].timestamp === payload.timestamp) return;
+  }
+  arr.push(payload);
+  writePending(arr);
+  showPendingNote();
+}
+
+function dropPending(timestamp) {
+  writePending(readPending().filter(function (p) { return p.timestamp !== timestamp; }));
+  showPendingNote();
+}
+
+function flushPending() {
+  if (!urlLooksSet()) { showPendingNote(); return; }
+  var arr = readPending();
+  if (!arr.length) { showPendingNote(); return; }
+
+  var next = arr[0];
+  postSession(next).then(function () {
+    dropPending(next.timestamp);
+    flushPending();
+  }).catch(function () { showPendingNote(); });
+}
+
+function showPendingNote() {
+  var n = readPending().length;
+  var note = el('pendingNote');
+  note.hidden = (n === 0);
+  note.textContent = n
+    ? (n + ' finished score' + (n > 1 ? 's' : '') + ' still waiting to send. ' +
+       'They will go out on their own once you are on wifi.')
+    : '';
+}
+
+/* ---------------------------- wake lock ------------------------ */
+
+function requestWakeLock() {
+  if (!CONFIG.KEEP_SCREEN_AWAKE || !navigator.wakeLock) return;
+  navigator.wakeLock.request('screen')
+    .then(function (l) { wakeLock = l; })
+    .catch(function () {});
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    try { wakeLock.release(); } catch (e) {}
+    wakeLock = null;
+  }
+}
+
+/* ------------------------------ wiring ------------------------- */
+
+el('pad').addEventListener('click', function (ev) {
+  var btn = ev.target.closest('button[data-k]');
+  if (btn) press(btn.getAttribute('data-k'));
+});
+
+document.addEventListener('keydown', function (ev) {
+  if (!acceptingInput) return;
+  if (ev.key >= '0' && ev.key <= '9') press(ev.key);
+  else if (ev.key === 'Backspace') press('del');
+  else if (ev.key === 'Enter') press('go');
+});
+
+el('startBtn').addEventListener('click', startSession);
+el('againBtn').addEventListener('click', startSession);
+el('retryBtn').addEventListener('click', function () {
+  var arr = readPending();
+  if (arr.length) deliver(arr[arr.length - 1], true);
+});
+
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && !acceptingInput) flushPending();
+});
+
+(function init() {
+  el('greeting').textContent = 'Hi ' + CONFIG.STUDENT_NAME + '!';
+  el('startBlurb').innerHTML =
+    CONFIG.PROBLEMS_PER_SESSION + ' multiplication facts<br>' +
+    CONFIG.MIN_FACTOR + ' through ' + CONFIG.MAX_FACTOR + ' &middot; ' +
+    CONFIG.SECONDS_PER_PROBLEM + ' seconds each';
+  el('counter').textContent = '1 / ' + CONFIG.PROBLEMS_PER_SESSION;
+  el('ringNum').textContent = String(CONFIG.SECONDS_PER_PROBLEM);
+  showPendingNote();
+  flushPending();
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  }
+})();
+</script>
+</body>
+</html>
