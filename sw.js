@@ -8,7 +8,7 @@
  * background refresh, which means code changes land on the SECOND open.
  * That lag is normal; remember it when testing.
  */
-const CACHE = 'mathfacts-v1';
+const CACHE = 'mathfacts-v2';
 
 const PRECACHE = [
   './',
@@ -68,14 +68,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Page loads carry a ?student=... tag, which would otherwise miss the cache
+  // and break offline. Cache every navigation under its bare path instead.
+  const key = (req.mode === 'navigate')
+    ? new Request(url.origin + url.pathname)
+    : req;
+
   // Everything else: cache-first, refresh in the background.
   event.respondWith(
-    caches.match(req).then((hit) => {
+    caches.match(key).then((hit) => {
       const net = fetch(req)
         .then((res) => {
           if (res && res.ok) {
             const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy));
+            caches.open(CACHE).then((c) => c.put(key, copy));
           }
           return res;
         })

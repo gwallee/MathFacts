@@ -9,12 +9,13 @@
 <link rel="icon" href="icon-192.png">
 <title>Math Facts — Parent Dashboard</title>
 
-<!-- Every setting for this app lives in config.js — not in this file. -->
+<!-- Setup lives in config.js. Practice settings live in the Sheet and are
+     edited at the bottom of this page. -->
 <script src="config.js"></script>
 
 <style>
   :root{
-    --bg:#0b1220; --card:#161f36; --card2:#1d284363; --ink:#f3f6ff; --muted:#9fb0d0;
+    --bg:#0b1220; --card:#161f36; --ink:#f3f6ff; --muted:#9fb0d0;
     --accent:#4f9cff; --good:#31c48d; --bad:#f96a6a; --warn:#f7b955; --line:#28345a;
   }
   *{box-sizing:border-box}
@@ -22,7 +23,7 @@
   body{
     background:var(--bg);color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
-    padding:max(16px,env(safe-area-inset-top)) 14px 40px;
+    padding:max(16px,env(safe-area-inset-top)) 14px 48px;
     max-width:640px;margin:0 auto;
   }
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:4px}
@@ -31,7 +32,14 @@
     border:0;border-radius:10px;background:var(--card);color:var(--ink);
     font-size:13px;font-weight:700;padding:8px 14px;
   }
-  .updated{font-size:12px;color:var(--muted);margin-bottom:18px}
+  .updated{font-size:12px;color:var(--muted);margin-bottom:14px}
+
+  .tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+  .tabs button{
+    border:0;border-radius:999px;background:var(--card);color:var(--muted);
+    font-size:15px;font-weight:700;padding:10px 20px;
+  }
+  .tabs button.on{background:var(--accent);color:#04121f}
 
   h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;
      color:var(--muted);margin:26px 0 10px;font-weight:800}
@@ -53,9 +61,7 @@
   .trow .fact{font-size:20px;font-weight:800;min-width:78px;white-space:nowrap}
   .trow .meta{flex:1;font-size:13px;color:var(--muted);line-height:1.45}
   .trow .meta em{font-style:normal;color:var(--ink);font-weight:700}
-  .heat{
-    font-size:12px;font-weight:800;padding:5px 10px;border-radius:99px;white-space:nowrap;
-  }
+  .heat{font-size:12px;font-weight:800;padding:5px 10px;border-radius:99px;white-space:nowrap}
   .heat.hot{background:#43191b;color:#ffb3b3}
   .heat.warm{background:#3d3418;color:#ffdf9e}
 
@@ -69,6 +75,33 @@
   .badge.a{background:#11331f;color:#8ff0c4}
   .badge.b{background:#33301199;color:#ffe08a}
   .badge.c{background:#3a1c1c;color:#ffc9c9}
+
+  /* ---- settings editor ---- */
+  .settings{background:var(--card);border-radius:16px;padding:16px}
+  .field{display:flex;align-items:center;justify-content:space-between;gap:12px;
+         padding:11px 0;border-bottom:1px solid var(--line)}
+  .field:last-of-type{border-bottom:0}
+  .field label{font-size:15px;flex:1}
+  .field label small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+  .field input{
+    width:104px;flex:none;background:#0d1424;border:1px solid var(--line);color:var(--ink);
+    border-radius:10px;padding:11px;font-size:17px;font-weight:700;text-align:center;
+    font-family:inherit;
+  }
+  .field input[type=text]{width:130px;text-align:left;font-weight:600}
+  .field input:focus{outline:2px solid var(--accent);border-color:transparent}
+  .save{
+    margin-top:14px;width:100%;border:0;border-radius:14px;padding:15px;
+    font-size:17px;font-weight:800;background:var(--accent);color:#04121f;
+  }
+  .save:disabled{opacity:.55}
+  .saveMsg{margin-top:10px;font-size:13px;line-height:1.5;min-height:18px}
+  .saveMsg.ok{color:var(--good)} .saveMsg.bad{color:var(--bad)}
+  .link{
+    margin-top:14px;background:#0d1424;border-radius:12px;padding:12px;
+    font-size:12px;color:var(--muted);line-height:1.6;word-break:break-all;
+  }
+  .link b{color:var(--ink);font-weight:700}
 
   .empty{background:var(--card);border-radius:16px;padding:22px;text-align:center;
          color:var(--muted);font-size:14px;line-height:1.55}
@@ -84,24 +117,24 @@
 </header>
 <div class="updated" id="updated">Loading…</div>
 
+<div class="tabs" id="tabs"></div>
 <div id="content">
   <div class="empty">Loading sessions…</div>
 </div>
 
 <script>
 /* ------------------------------------------------------------------
-   Settings come from config.js (window.MATH_CONFIG).
+   Shared settings come from config.js. Each kid's practice settings
+   come from the Sheet and are edited at the bottom of this page.
    ------------------------------------------------------------------ */
 var DEFAULTS = {
   SCRIPT_URL: '',
-  STUDENT_NAME: 'Caleb',
   TROUBLE_WINDOW: 10,
   TROUBLE_MIN_SESSIONS: 2,
   TREAT_COMMUTATIVE_AS_SAME: true,
   TREND_SESSIONS: 20,
   RECENT_SESSIONS_SHOWN: 12,
-  WEEKS_SHOWN: 8,
-  SECONDS_PER_PROBLEM: 8
+  WEEKS_SHOWN: 8
 };
 
 var CONFIG = (function () {
@@ -115,6 +148,13 @@ var CONFIG = (function () {
   return out;
 })();
 
+var PIN_KEY = 'mathfacts_pin_v1';
+
+var ALL = [];          // every session, normalised, oldest first
+var SETTINGS = {};     // key -> {name, minFactor, maxFactor, ...}
+var ACTIVE = '';       // selected student key
+var PIN_REQUIRED = false;
+
 function el(id) { return document.getElementById(id); }
 function esc(s) {
   return String(s).replace(/[&<>"]/g, function (c) {
@@ -126,13 +166,16 @@ function mmss(sec) {
   return Math.floor(t / 60) + ':' + (t % 60 < 10 ? '0' : '') + (t % 60);
 }
 function pct(x) { return Math.round(x * 100) + '%'; }
+function scriptSet() {
+  return CONFIG.SCRIPT_URL && CONFIG.SCRIPT_URL.indexOf('http') === 0;
+}
 
 /* ------------------------------ load ---------------------------- */
 
 function load() {
   el('updated').textContent = 'Loading…';
 
-  if (!CONFIG.SCRIPT_URL || CONFIG.SCRIPT_URL.indexOf('http') !== 0) {
+  if (!scriptSet()) {
     el('content').innerHTML =
       '<div class="err"><b>No data source configured.</b><br>' +
       'Open <code>config.js</code> in the repo and paste the Apps Script ' +
@@ -149,7 +192,16 @@ function load() {
     .then(function (r) { return r.json(); })
     .then(function (data) {
       if (!data || !data.ok) throw new Error((data && data.error) || 'bad response');
-      render(normalise(data.sessions || []));
+
+      ALL = normalise(data.sessions || []);
+      SETTINGS = data.settings || {};
+      PIN_REQUIRED = !!data.pinRequired;
+
+      var keys = studentKeys();
+      if (!ACTIVE || keys.indexOf(ACTIVE) === -1) ACTIVE = keys[0] || '';
+
+      renderTabs(keys);
+      render();
       el('updated').textContent =
         'Updated ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     })
@@ -171,6 +223,7 @@ function normalise(rows) {
     var elapsed = Number(r.elapsedSeconds) || 0;
     return {
       when: when,
+      key: String(r.studentKey || r.student || '').toLowerCase(),
       student: r.student || '',
       score: Number(r.score) || 0,
       total: total,
@@ -183,6 +236,43 @@ function normalise(rows) {
 
   out.sort(function (a, b) { return a.when - b.when; });   // oldest first
   return out;
+}
+
+/** Everyone in the settings, plus anyone who has sessions but no settings row. */
+function studentKeys() {
+  var keys = Object.keys(SETTINGS);
+  ALL.forEach(function (s) {
+    if (s.key && keys.indexOf(s.key) === -1) keys.push(s.key);
+  });
+  return keys;
+}
+
+function displayName(key) {
+  if (SETTINGS[key] && SETTINGS[key].name) return SETTINGS[key].name;
+  for (var i = ALL.length - 1; i >= 0; i--) if (ALL[i].key === key) return ALL[i].student;
+  return key;
+}
+
+function sessionsFor(key) {
+  return ALL.filter(function (s) { return s.key === key; });
+}
+
+function renderTabs(keys) {
+  var box = el('tabs');
+  box.innerHTML = '';
+  if (keys.length < 2) return;
+  keys.forEach(function (k) {
+    var b = document.createElement('button');
+    b.textContent = displayName(k);
+    if (k === ACTIVE) b.className = 'on';
+    b.addEventListener('click', function () {
+      ACTIVE = k;
+      renderTabs(keys);
+      render();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    box.appendChild(b);
+  });
 }
 
 /* ---------------------------- analytics ------------------------- */
@@ -336,22 +426,122 @@ function barChart(items) {
   return svg + '</svg>';
 }
 
+/* --------------------------- settings card ---------------------- */
+
+function settingsCard(key) {
+  var s = SETTINGS[key];
+  if (!s) {
+    return '<h2>Settings</h2><div class="empty">' + esc(displayName(key)) +
+           ' has sessions but no settings row in the Sheet yet.</div>';
+  }
+
+  var quizUrl = location.origin + location.pathname.replace(/dashboard\.html$/, '') +
+                '?student=' + encodeURIComponent(key);
+
+  var html = '<h2>' + esc(s.name) + '&rsquo;s settings</h2><div class="settings">';
+
+  html += field_('setName', 'Name', 'shown on the quiz screen', s.name, 'text');
+  html += field_('setSeconds', 'Seconds per problem',
+                 'how long before it counts as a miss', s.secondsPerProblem, 'number', 3, 60);
+  html += field_('setMin', 'Smallest number', 'e.g. 3 skips all the ×2 facts',
+                 s.minFactor, 'number', 1, 20);
+  html += field_('setMax', 'Largest number', '', s.maxFactor, 'number', 1, 20);
+  html += field_('setProblems', 'Problems per session', '', s.problemsPerSession, 'number', 5, 100);
+
+  if (PIN_REQUIRED) {
+    html += field_('setPin', 'Parent PIN', 'required to save changes',
+                   localStorage.getItem(PIN_KEY) || '', 'text');
+  }
+
+  html += '<button class="save" id="saveBtn">Save ' + esc(s.name) + '&rsquo;s settings</button>';
+  html += '<div class="saveMsg" id="saveMsg"></div>';
+  html += '<div class="link"><b>' + esc(s.name) + '&rsquo;s quiz link</b><br>' +
+          esc(quizUrl) + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function field_(id, label, hint, value, type, min, max) {
+  return '<div class="field"><label for="' + id + '">' + esc(label) +
+         (hint ? '<small>' + esc(hint) + '</small>' : '') + '</label>' +
+         '<input id="' + id + '" type="' + type + '"' +
+         (type === 'number' ? ' inputmode="numeric" min="' + min + '" max="' + max + '"' : '') +
+         ' value="' + esc(value) + '"></div>';
+}
+
+function wireSettings(key) {
+  var btn = el('saveBtn');
+  if (!btn) return;
+
+  btn.addEventListener('click', function () {
+    var msg = el('saveMsg');
+    var body = {
+      name: el('setName').value.trim(),
+      secondsPerProblem: Number(el('setSeconds').value),
+      minFactor: Number(el('setMin').value),
+      maxFactor: Number(el('setMax').value),
+      problemsPerSession: Number(el('setProblems').value)
+    };
+
+    if (!body.name) { msg.className = 'saveMsg bad'; msg.textContent = 'Name cannot be empty.'; return; }
+    if (body.minFactor > body.maxFactor) {
+      msg.className = 'saveMsg bad';
+      msg.textContent = 'The smallest number has to be below the largest.';
+      return;
+    }
+
+    var payload = { type: 'settings', students: {} };
+    payload.students[key] = body;
+    if (PIN_REQUIRED) {
+      payload.pin = el('setPin').value.trim();
+      try { localStorage.setItem(PIN_KEY, payload.pin); } catch (e) {}
+    }
+
+    btn.disabled = true;
+    msg.className = 'saveMsg';
+    msg.textContent = 'Saving…';
+
+    fetch(CONFIG.SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        btn.disabled = false;
+        if (!data || !data.ok) throw new Error((data && data.error) || 'rejected');
+        SETTINGS = data.settings || SETTINGS;
+        msg.className = 'saveMsg ok';
+        msg.textContent = 'Saved. It applies on ' + displayName(key) +
+                          '’s next round — the app picks it up next time it opens.';
+        renderTabs(studentKeys());
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        msg.className = 'saveMsg bad';
+        msg.textContent = 'Could not save: ' + err.message;
+      });
+  });
+}
+
 /* ------------------------------ render -------------------------- */
 
-function render(sessions) {
-  el('title').textContent = (sessions.length && sessions[sessions.length - 1].student) ||
-                            CONFIG.STUDENT_NAME;
+function render() {
+  var key = ACTIVE;
+  var sessions = sessionsFor(key);
+  el('title').textContent = displayName(key) || 'Math Facts';
+
+  var html = '';
 
   if (!sessions.length) {
-    el('content').innerHTML =
-      '<div class="empty">No sessions logged yet.<br><br>' +
-      'Once ' + esc(CONFIG.STUDENT_NAME) + ' finishes a round on the quiz app, it will ' +
-      'show up here.</div>';
+    html += '<div class="empty">No sessions logged for ' + esc(displayName(key)) + ' yet.' +
+            '<br><br>Once a round is finished on the quiz app, it shows up here.</div>';
+    html += settingsCard(key);
+    el('content').innerHTML = html;
+    wireSettings(key);
     return;
   }
 
-  var html = '';
-  var last = sessions[sessions.length - 1];
   var recent5 = sessions.slice(-5);
   var prev5 = sessions.slice(-10, -5);
 
@@ -389,7 +579,7 @@ function render(sessions) {
   html += '<h2>Sessions per week</h2><div class="panel">' + barChart(weeks) +
           '<div class="cap">Last ' + CONFIG.WEEKS_SHOWN + ' weeks, Monday start.</div></div>';
 
-  /* ---- accuracy trend ---- */
+  /* ---- trends ---- */
   var trend = sessions.slice(-CONFIG.TREND_SESSIONS);
   var tLabels = trend.map(function (s) {
     return (s.when.getMonth() + 1) + '/' + s.when.getDate();
@@ -402,14 +592,15 @@ function render(sessions) {
           }) +
           '<div class="cap">Last ' + trend.length + ' sessions.</div></div>';
 
-  /* ---- speed trend ---- */
+  var allowed = SETTINGS[key] ? SETTINGS[key].secondsPerProblem : null;
   html += '<h2>Seconds per problem</h2><div class="panel">' +
           lineChart(trend.map(function (s) { return s.perProblem; }), tLabels, {
             color: '#f7b955',
             fmt: function (v) { return v.toFixed(1) + 's'; }
           }) +
-          '<div class="cap">Lower is faster. The timer allows ' +
-          CONFIG.SECONDS_PER_PROBLEM + 's per problem.</div></div>';
+          '<div class="cap">Lower is faster.' +
+          (allowed ? ' The timer currently allows ' + allowed + 's per problem.' : '') +
+          '</div></div>';
 
   /* ---- trouble facts ---- */
   var tf = troubleFacts(sessions);
@@ -420,8 +611,8 @@ function render(sessions) {
             ' or more of the last ' + tf.windowSize + ' session' +
             (tf.windowSize === 1 ? '' : 's') + '.' +
             (tf.oneOffs.length
-              ? '<br><br>' + tf.oneOffs.length + ' fact' + (tf.oneOffs.length > 1 ? 's were' : ' was') +
-                ' missed once — treating that as noise.'
+              ? '<br><br>' + tf.oneOffs.length + ' fact' +
+                (tf.oneOffs.length > 1 ? 's were' : ' was') + ' missed once — treating that as noise.'
               : '') +
             '</div>';
   } else {
@@ -435,9 +626,7 @@ function render(sessions) {
       if (wrongs.length) {
         bits.push('said ' + wrongs.map(function (w) { return '<em>' + esc(w) + '</em>'; }).join(', '));
       }
-      if (f.timeouts) {
-        bits.push('ran out of time ' + f.timeouts + '×');
-      }
+      if (f.timeouts) bits.push('ran out of time ' + f.timeouts + '×');
 
       var hot = f.sessions >= Math.max(3, Math.ceil(tf.windowSize * 0.4));
       html += '<div class="trow">' +
@@ -460,13 +649,10 @@ function render(sessions) {
 
   /* ---- recent sessions ---- */
   html += '<h2>Recent sessions</h2>';
-  var recent = sessions.slice(-CONFIG.RECENT_SESSIONS_SHOWN).reverse();
-
-  recent.forEach(function (s) {
+  sessions.slice(-CONFIG.RECENT_SESSIONS_SHOWN).reverse().forEach(function (s) {
     var cls = s.accuracy >= 0.9 ? 'a' : (s.accuracy >= 0.75 ? 'b' : 'c');
     var when = s.when.toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' }) +
                ', ' + s.when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-
     var missTxt = s.missed.length
       ? s.missed.map(function (m) { return m.a + '×' + m.b; }).join(', ')
       : 'no misses';
@@ -480,7 +666,11 @@ function render(sessions) {
             '</div>';
   });
 
+  /* ---- settings ---- */
+  html += settingsCard(key);
+
   el('content').innerHTML = html;
+  wireSettings(key);
 }
 
 el('refreshBtn').addEventListener('click', load);

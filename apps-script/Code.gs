@@ -1,10 +1,13 @@
 /**
- * Caleb - Math Facts logger
+ * Math Facts logger — Caleb and Ellie
  * Google Apps Script web app, bound to the results Spreadsheet.
  *
- *   doPost  <-  the quiz page posts one finished session; we validate it,
- *               append a row, then push a notification to ntfy.
- *   doGet   ->  the parent dashboard reads sessions back as JSON.
+ *   doPost  <-  the quiz posts a finished session; we validate it, append a
+ *               row, then push a notification to ntfy.
+ *           <-  the dashboard posts {type:'settings'} to change a kid's
+ *               range / problem count / timer.
+ *   doGet   ->  the dashboard reads sessions + settings as JSON.
+ *           ->  ?settings=1 returns just the settings (what the quiz asks for).
  *
  * IMPORTANT: this file lives in a PUBLIC GitHub repo, so the copy here
  * carries a placeholder topic. Put your real ntfy topic ONLY in the copy
@@ -19,28 +22,54 @@ var CONFIG = {
   NTFY_SERVER: 'https://ntfy.sh',
   NTFY_TITLE: 'Math facts',       // ASCII only - ntfy headers must be ASCII
 
-  SHEET_NAME: 'Sessions',
+  SESSIONS_SHEET: 'Sessions',
+  SETTINGS_SHEET: 'Settings',
 
-  // Only accept sessions for this name. Set to '' to accept any name.
-  EXPECTED_STUDENT: 'Caleb',
+  // Optional. Leave '' and anyone with the /exec URL can change the kids'
+  // settings from a copy of the dashboard. Set it to a short code and the
+  // dashboard will ask for it once before saving. Because it is checked
+  // HERE and not in the public page source, it is a real lock.
+  PARENT_PIN: '',
 
   MAX_PROBLEMS: 500,              // sanity ceiling on problems per session
   DEFAULT_LIMIT: 400              // rows doGet returns when ?limit is absent
 };
+
+// Seeded into the Settings tab the first time this script runs. After that
+// the Sheet is the source of truth and you edit on the dashboard, not here.
+var DEFAULT_STUDENTS = [
+  { key: 'caleb', name: 'Caleb', minFactor: 3, maxFactor: 12,
+    problemsPerSession: 20, secondsPerProblem: 8 },
+  { key: 'ellie', name: 'Ellie', minFactor: 1, maxFactor: 10,
+    problemsPerSession: 20, secondsPerProblem: 12 }
+];
 // ====================================================================
 
 var HEADERS = [
   'Timestamp',        // A - when the session finished (phone clock), ISO text
   'ReceivedAt',       // B - when this script stored it, ISO text
-  'Student',          // C
-  'Score',            // D
-  'Total',            // E
-  'Accuracy',         // F - 0..1
-  'ElapsedSeconds',   // G
-  'AvgSecPerProblem', // H
-  'MissedCount',      // I
-  'Missed'            // J - JSON: [{a,b,correct,given,timeout}, ...]
+  'StudentKey',       // C - 'caleb' / 'ellie'
+  'Student',          // D - display name at the time of the session
+  'Score',            // E
+  'Total',            // F
+  'Accuracy',         // G - 0..1
+  'ElapsedSeconds',   // H
+  'AvgSecPerProblem', // I
+  'MissedCount',      // J
+  'Missed'            // K - JSON: [{a,b,correct,given,timeout}, ...]
 ];
+
+var SETTINGS_HEADERS = [
+  'Key', 'Name', 'MinFactor', 'MaxFactor', 'ProblemsPerSession',
+  'SecondsPerProblem', 'UpdatedAt'
+];
+
+// Guard rails applied to whatever the dashboard sends.
+var LIMITS = {
+  factor: { min: 1, max: 20 },
+  problems: { min: 5, max: 100 },
+  seconds: { min: 3, max: 60 }
+};
 
 
 /* ------------------------------ doPost ------------------------------ */
@@ -58,39 +87,8 @@ function doPost(e) {
       return json_({ ok: false, error: 'body is not valid JSON' });
     }
 
-    var check = validate_(payload);
-    if (!check.ok) return json_(check);
-    var s = check.session;
-
-    var lock = LockService.getScriptLock();
-    lock.waitLock(20000);
-    try {
-      getSheet_().appendRow([
-        s.timestamp,
-        new Date().toISOString(),
-        s.student,
-        s.score,
-        s.total,
-        s.total ? s.score / s.total : 0,
-        s.elapsedSeconds,
-        s.total ? Math.round((s.elapsedSeconds / s.total) * 100) / 100 : 0,
-        s.missed.length,
-        JSON.stringify(s.missed)
-      ]);
-    } finally {
-      lock.releaseLock();
-    }
-
-    // A failed push must not make the quiz think the session was lost,
-    // so the row is already safely stored before we try to notify.
-    var pushed = true;
-    try {
-      notify_(s);
-    } catch (pushErr) {
-      pushed = false;
-    }
-
-    return json_({ ok: true, stored: true, pushed: pushed });
+    if (payload && payload.type === 'settings') return saveSettings_(payload);
+    return saveSession_(payload);
 
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -98,17 +96,60 @@ function doPost(e) {
 }
 
 
-function validate_(p) {
+function saveSession_(payload) {
+  var settings = readSettings_();
+  var check = validateSession_(payload, settings);
+  if (!check.ok) return json_(check);
+  var s = check.session;
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    getSessionsSheet_().appendRow([
+      s.timestamp,
+      new Date().toISOString(),
+      s.studentKey,
+      s.student,
+      s.score,
+      s.total,
+      s.total ? s.score / s.total : 0,
+      s.elapsedSeconds,
+      s.total ? Math.round((s.elapsedSeconds / s.total) * 100) / 100 : 0,
+      s.missed.length,
+      JSON.stringify(s.missed)
+    ]);
+  } finally {
+    lock.releaseLock();
+  }
+
+  // A failed push must not make the quiz think the session was lost, so the
+  // row is already safely stored before we try to notify.
+  var pushed = true;
+  try {
+    notify_(s);
+  } catch (pushErr) {
+    pushed = false;
+  }
+
+  return json_({ ok: true, stored: true, pushed: pushed });
+}
+
+
+function validateSession_(p, settings) {
   if (!p || typeof p !== 'object' || Array.isArray(p)) {
     return { ok: false, error: 'payload must be a JSON object' };
   }
 
-  var student = String(p.student == null ? '' : p.student).trim().slice(0, 40);
-  if (!student) return { ok: false, error: 'missing student' };
-  if (CONFIG.EXPECTED_STUDENT &&
-      student.toLowerCase() !== CONFIG.EXPECTED_STUDENT.toLowerCase()) {
-    return { ok: false, error: 'unknown student' };
+  // Accept either the key ('ellie') or the display name ('Ellie').
+  var raw = String(p.studentKey || p.student || '').trim().toLowerCase();
+  if (!raw) return { ok: false, error: 'missing student' };
+
+  var key = null;
+  for (var k in settings) {
+    if (!settings.hasOwnProperty(k)) continue;
+    if (k === raw || String(settings[k].name).toLowerCase() === raw) { key = k; break; }
   }
+  if (!key) return { ok: false, error: 'unknown student' };
 
   var total = Math.round(Number(p.total));
   var score = Math.round(Number(p.score));
@@ -139,7 +180,8 @@ function validate_(p) {
     ok: true,
     session: {
       timestamp: ts,
-      student: student,
+      studentKey: key,
+      student: settings[key].name,
       score: score,
       total: total,
       elapsedSeconds: Math.round(elapsed * 10) / 10,
@@ -156,6 +198,110 @@ function cleanMiss_(m) {
   if (!isFinite(a) || !isFinite(b)) return null;
   var given = (m.given === null || m.given === undefined) ? '' : String(m.given).slice(0, 8);
   return { a: a, b: b, correct: a * b, given: given, timeout: !!m.timeout };
+}
+
+
+/* ----------------------------- settings ----------------------------- */
+
+function saveSettings_(payload) {
+  if (CONFIG.PARENT_PIN && String(payload.pin || '') !== String(CONFIG.PARENT_PIN)) {
+    return json_({ ok: false, error: 'wrong PIN' });
+  }
+  if (!payload.students || typeof payload.students !== 'object') {
+    return json_({ ok: false, error: 'missing students' });
+  }
+
+  var current = readSettings_();
+  var keys = Object.keys(payload.students);
+  if (!keys.length) return json_({ ok: false, error: 'no students supplied' });
+
+  for (var i = 0; i < keys.length; i++) {
+    var key = String(keys[i]).trim().toLowerCase();
+    if (!/^[a-z0-9_-]{1,20}$/.test(key)) {
+      return json_({ ok: false, error: 'bad student key: ' + keys[i] });
+    }
+
+    var incoming = payload.students[keys[i]] || {};
+    var base = current[key] || { key: key, name: key, minFactor: 2, maxFactor: 12,
+                                 problemsPerSession: 20, secondsPerProblem: 10 };
+
+    var name = String(incoming.name == null ? base.name : incoming.name).trim().slice(0, 30);
+    if (!name) return json_({ ok: false, error: 'name cannot be empty' });
+
+    var minF = clampInt_(incoming.minFactor, base.minFactor, LIMITS.factor);
+    var maxF = clampInt_(incoming.maxFactor, base.maxFactor, LIMITS.factor);
+    if (minF > maxF) return json_({ ok: false, error: 'smallest number is above the largest for ' + name });
+
+    current[key] = {
+      key: key,
+      name: name,
+      minFactor: minF,
+      maxFactor: maxF,
+      problemsPerSession: clampInt_(incoming.problemsPerSession, base.problemsPerSession, LIMITS.problems),
+      secondsPerProblem: clampInt_(incoming.secondsPerProblem, base.secondsPerProblem, LIMITS.seconds),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  writeSettings_(current);
+  return json_({ ok: true, saved: true, settings: readSettings_() });
+}
+
+
+function clampInt_(value, fallback, limit) {
+  var n = Math.round(Number(value));
+  if (!isFinite(n)) return fallback;
+  return Math.max(limit.min, Math.min(limit.max, n));
+}
+
+
+function readSettings_() {
+  var sh = getSettingsSheet_();
+  var out = {};
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return out;
+
+  var values = sh.getRange(2, 1, lastRow - 1, SETTINGS_HEADERS.length).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    var key = String(r[0] || '').trim().toLowerCase();
+    if (!key) continue;
+    out[key] = {
+      key: key,
+      name: String(r[1] || key),
+      minFactor: Number(r[2]) || 1,
+      maxFactor: Number(r[3]) || 12,
+      problemsPerSession: Number(r[4]) || 20,
+      secondsPerProblem: Number(r[5]) || 10,
+      updatedAt: cellToIso_(r[6])
+    };
+  }
+  return out;
+}
+
+
+function writeSettings_(settingsObj) {
+  var sh = getSettingsSheet_();
+  var keys = Object.keys(settingsObj).sort();
+  var rows = keys.map(function (k) {
+    var s = settingsObj[k];
+    return [s.key, s.name, s.minFactor, s.maxFactor,
+            s.problemsPerSession, s.secondsPerProblem,
+            s.updatedAt || new Date().toISOString()];
+  });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    if (sh.getLastRow() > 1) {
+      sh.getRange(2, 1, sh.getLastRow() - 1, SETTINGS_HEADERS.length).clearContent();
+    }
+    if (rows.length) {
+      sh.getRange(2, 1, rows.length, SETTINGS_HEADERS.length).setValues(rows);
+    }
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 
@@ -201,11 +347,16 @@ function doGet(e) {
       return json_({ ok: true, pong: true, time: new Date().toISOString() });
     }
 
+    // The quiz only needs settings, and asks for them on every open.
+    if (params.settings) {
+      return json_({ ok: true, settings: readSettings_() });
+    }
+
     var limit = parseInt(params.limit, 10);
     if (!isFinite(limit) || limit < 1) limit = CONFIG.DEFAULT_LIMIT;
     limit = Math.min(limit, 5000);
 
-    var sheet = getSheet_();
+    var sheet = getSessionsSheet_();
     var lastRow = sheet.getLastRow();
     var sessions = [];
 
@@ -215,11 +366,11 @@ function doGet(e) {
 
       for (var i = 0; i < values.length; i++) {
         var r = values[i];
-        if (!r[0] && !r[2]) continue;             // blank row
+        if (!r[0] && !r[3]) continue;             // blank row
 
         var missed = [];
         try {
-          if (r[9]) missed = JSON.parse(String(r[9]));
+          if (r[10]) missed = JSON.parse(String(r[10]));
           if (!Array.isArray(missed)) missed = [];
         } catch (jsonErr) {
           missed = [];
@@ -228,19 +379,26 @@ function doGet(e) {
         sessions.push({
           timestamp: cellToIso_(r[0]),
           receivedAt: cellToIso_(r[1]),
-          student: String(r[2] || ''),
-          score: Number(r[3]) || 0,
-          total: Number(r[4]) || 0,
-          accuracy: Number(r[5]) || 0,
-          elapsedSeconds: Number(r[6]) || 0,
-          avgSecPerProblem: Number(r[7]) || 0,
-          missedCount: Number(r[8]) || 0,
+          studentKey: String(r[2] || '').toLowerCase(),
+          student: String(r[3] || ''),
+          score: Number(r[4]) || 0,
+          total: Number(r[5]) || 0,
+          accuracy: Number(r[6]) || 0,
+          elapsedSeconds: Number(r[7]) || 0,
+          avgSecPerProblem: Number(r[8]) || 0,
+          missedCount: Number(r[9]) || 0,
           missed: missed
         });
       }
     }
 
-    return json_({ ok: true, count: sessions.length, sessions: sessions });
+    return json_({
+      ok: true,
+      count: sessions.length,
+      sessions: sessions,
+      settings: readSettings_(),
+      pinRequired: !!CONFIG.PARENT_PIN
+    });
 
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -250,10 +408,10 @@ function doGet(e) {
 
 /* ------------------------------ helpers ----------------------------- */
 
-function getSheet_() {
+function getSessionsSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(CONFIG.SHEET_NAME);
-  if (!sh) sh = ss.insertSheet(CONFIG.SHEET_NAME);
+  var sh = ss.getSheetByName(CONFIG.SESSIONS_SHEET);
+  if (!sh) sh = ss.insertSheet(CONFIG.SESSIONS_SHEET);
 
   if (sh.getLastRow() === 0) {
     sh.appendRow(HEADERS);
@@ -265,6 +423,29 @@ function getSheet_() {
   }
   return sh;
 }
+
+
+function getSettingsSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(CONFIG.SETTINGS_SHEET);
+  if (!sh) sh = ss.insertSheet(CONFIG.SETTINGS_SHEET);
+
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(SETTINGS_HEADERS);
+    sh.getRange(1, 1, 1, SETTINGS_HEADERS.length).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.getRange('G:G').setNumberFormat('@');
+
+    var now = new Date().toISOString();
+    var seed = DEFAULT_STUDENTS.map(function (s) {
+      return [s.key, s.name, s.minFactor, s.maxFactor,
+              s.problemsPerSession, s.secondsPerProblem, now];
+    });
+    sh.getRange(2, 1, seed.length, SETTINGS_HEADERS.length).setValues(seed);
+  }
+  return sh;
+}
+
 
 function cellToIso_(v) {
   if (v instanceof Date) return v.toISOString();
@@ -294,7 +475,7 @@ function json_(obj) {
 /** Editor > pick testNotification > Run. Your phone should buzz. */
 function testNotification() {
   notify_({
-    student: CONFIG.EXPECTED_STUDENT || 'Caleb',
+    student: 'Caleb',
     score: 18,
     total: 20,
     elapsedSeconds: 161,
@@ -310,7 +491,7 @@ function testAppendRow() {
   var fake = {
     postData: {
       contents: JSON.stringify({
-        student: CONFIG.EXPECTED_STUDENT || 'Caleb',
+        studentKey: 'caleb',
         timestamp: new Date().toISOString(),
         score: 18,
         total: 20,
@@ -320,4 +501,9 @@ function testAppendRow() {
     }
   };
   Logger.log(doPost(fake).getContent());
+}
+
+/** Editor > pick showSettings > Run, then View > Logs. */
+function showSettings() {
+  Logger.log(JSON.stringify(readSettings_(), null, 2));
 }

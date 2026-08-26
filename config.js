@@ -1,11 +1,17 @@
 /* ==================================================================
-   MATH FACTS — ALL SETTINGS LIVE IN THIS ONE FILE
+   MATH FACTS — SETUP FILE
    ------------------------------------------------------------------
-   Edit this file on github.com (pencil icon), commit, and BOTH the
-   quiz page and the parent dashboard pick the change up. Nothing else
-   ever needs editing.
-
    The one thing you MUST fill in is SCRIPT_URL (see README step 2).
+
+   Note what changed in v1.1: each kid's practice settings (range,
+   number of problems, seconds per problem) are NO LONGER edited here.
+   They live in the Google Sheet and you change them on the parent
+   dashboard, which means you can retune the timer from your phone
+   without touching code.
+
+   The STUDENTS block below is only a fallback — used before the app
+   has ever reached the network, and to seed the Sheet the first time
+   the script runs.
    ================================================================== */
 
 window.MATH_CONFIG = {
@@ -14,21 +20,36 @@ window.MATH_CONFIG = {
 
   // The Apps Script web app address. Paste the URL that ends in /exec
   // between the quotes. Until you do, the quiz still works but cannot
-  // send scores.
+  // send scores and cannot pick up dashboard settings.
   SCRIPT_URL: '',
 
 
-  /* --- who is practising ----------------------------------------- */
+  /* --- who practises ---------------------------------------------- */
+  /* Each kid gets their own link:                                     */
+  /*   .../MathFacts/?student=caleb                                    */
+  /*   .../MathFacts/?student=ellie                                    */
+  /* Opening the plain URL shows a "who's practising?" picker.         */
+  /* To add a third kid, add a key here AND on the dashboard.          */
 
-  STUDENT_NAME: 'Caleb',
+  STUDENTS: {
+    caleb: {
+      name: 'Caleb',
+      minFactor: 3,            // no ×2 problems
+      maxFactor: 12,
+      problemsPerSession: 20,
+      secondsPerProblem: 8
+    },
+    ellie: {
+      name: 'Ellie',
+      minFactor: 1,
+      maxFactor: 10,
+      problemsPerSession: 20,
+      secondsPerProblem: 12
+    }
+  },
 
 
-  /* --- the quiz --------------------------------------------------- */
-
-  MIN_FACTOR: 3,                 // smallest number used (3 = no ×2 problems)
-  MAX_FACTOR: 12,                // largest number used (never above 12)
-  PROBLEMS_PER_SESSION: 20,      // problems in one session
-  SECONDS_PER_PROBLEM: 8,        // countdown per problem; running out = a miss
+  /* --- quiz behaviour (same for everyone) -------------------------- */
 
   SHOW_CORRECT_ON_MISS: true,    // flash "7 × 8 = 56" after a wrong answer
   FEEDBACK_MS_CORRECT: 450,      // how long the green "Yes!" stays up
@@ -40,7 +61,7 @@ window.MATH_CONFIG = {
   SEND_TIMEOUT_MS: 12000,        // give up on the upload after this many ms
 
 
-  /* --- the parent dashboard --------------------------------------- */
+  /* --- the parent dashboard ---------------------------------------- */
 
   TROUBLE_WINDOW: 10,            // "missed in X of the last 10 sessions"
   TROUBLE_MIN_SESSIONS: 2,       // appear as a trouble fact only at 2+ sessions

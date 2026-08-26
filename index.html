@@ -13,7 +13,8 @@
 <link rel="icon" href="icon-192.png">
 <title>Math Facts</title>
 
-<!-- Every setting for this app lives in config.js — not in this file. -->
+<!-- Setup lives in config.js. Each kid's range and timer come from the
+     Sheet and are edited on the parent dashboard, not here. -->
 <script src="config.js"></script>
 
 <style>
@@ -36,8 +37,8 @@
   }
   .screen.on{display:flex}
 
-  /* ---------------- start ---------------- */
-  #screen-start{align-items:center;justify-content:center;text-align:center;gap:8px}
+  /* ---------------- picker & start ---------------- */
+  #screen-pick,#screen-start{align-items:center;justify-content:center;text-align:center;gap:8px}
   .hello{font-size:32px;font-weight:800}
   .sub{color:var(--muted);font-size:16px;line-height:1.6}
   .big-btn{
@@ -46,7 +47,17 @@
     background:linear-gradient(180deg,#63b0ff,#2b7fe0);box-shadow:0 8px 0 #1a5aa8;
   }
   .big-btn:active{transform:translateY(4px);box-shadow:0 4px 0 #1a5aa8}
+  .who{display:flex;flex-direction:column;gap:14px;margin-top:24px;width:100%;max-width:300px}
+  .who button{
+    border:0;border-radius:20px;padding:24px;font-size:26px;font-weight:800;
+    background:var(--pad);color:var(--ink);
+  }
+  .who button:active{background:var(--pad-press)}
   .note{margin-top:18px;font-size:13px;color:var(--muted);max-width:300px;line-height:1.5}
+  .switch{
+    margin-top:16px;background:none;border:0;color:var(--muted);
+    font-size:14px;text-decoration:underline;padding:8px;
+  }
 
   /* ---------------- play ----------------- */
   .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -119,15 +130,23 @@
 </head>
 <body>
 
-<!-- ======================= START ======================= -->
-<section id="screen-start" class="screen on">
+<!-- ======================= WHO'S PRACTISING ======================= -->
+<section id="screen-pick" class="screen">
+  <div class="hello">Math Facts</div>
+  <div class="sub">Who's practising?</div>
+  <div class="who" id="whoList"></div>
+</section>
+
+<!-- ============================ START ============================ -->
+<section id="screen-start" class="screen">
   <div class="hello" id="greeting">Math Facts</div>
   <div class="sub" id="startBlurb"></div>
   <button class="big-btn" id="startBtn">Start</button>
+  <button class="switch" id="switchBtn" hidden>Not you? Switch</button>
   <div class="note" id="pendingNote" hidden></div>
 </section>
 
-<!-- ======================== PLAY ======================== -->
+<!-- ============================ PLAY ============================= -->
 <section id="screen-play" class="screen">
   <div>
     <div class="topbar">
@@ -168,7 +187,7 @@
   </div>
 </section>
 
-<!-- ======================== DONE ======================== -->
+<!-- ============================ DONE ============================= -->
 <section id="screen-done" class="screen">
   <div class="result">
     <div class="score" id="finalScore">0</div>
@@ -192,16 +211,13 @@
 
 <script>
 /* ------------------------------------------------------------------
-   Settings come from config.js (window.MATH_CONFIG). The defaults
-   below are only a safety net if that file fails to load.
+   Shared settings come from config.js. Each kid's range / problem
+   count / timer comes from the Sheet (edited on the dashboard), with
+   the last synced copy cached on the phone so this still works with
+   no signal.
    ------------------------------------------------------------------ */
 var DEFAULTS = {
   SCRIPT_URL: '',
-  STUDENT_NAME: 'Caleb',
-  MIN_FACTOR: 3,
-  MAX_FACTOR: 12,
-  PROBLEMS_PER_SESSION: 20,
-  SECONDS_PER_PROBLEM: 8,
   SHOW_CORRECT_ON_MISS: true,
   FEEDBACK_MS_CORRECT: 450,
   FEEDBACK_MS_WRONG: 1700,
@@ -224,7 +240,12 @@ var CONFIG = (function () {
 })();
 
 var PENDING_KEY = 'mathfacts_pending_v1';
+var SETTINGS_KEY = 'mathfacts_settings_v1';
 var RING_C = 201.06;              // 2·π·r for r = 32, matching the SVG above
+
+var STUDENTS = {};                // live settings, keyed by student key
+var studentKey = '';              // who is practising right now
+var me = null;                    // STUDENTS[studentKey]
 
 var S = null;                     // live session state
 var rafId = null;
@@ -257,6 +278,108 @@ function urlLooksSet() {
          CONFIG.SCRIPT_URL.indexOf('http') === 0;
 }
 
+/* ------------------------ student settings ---------------------- */
+
+function normaliseStudent(key, raw) {
+  raw = raw || {};
+  return {
+    key: key,
+    name: String(raw.name || key),
+    minFactor: Number(raw.minFactor) || 1,
+    maxFactor: Number(raw.maxFactor) || 12,
+    problemsPerSession: Number(raw.problemsPerSession) || 20,
+    secondsPerProblem: Number(raw.secondsPerProblem) || 10
+  };
+}
+
+function readCachedSettings() {
+  try {
+    var raw = localStorage.getItem(SETTINGS_KEY);
+    var obj = raw ? JSON.parse(raw) : null;
+    return (obj && typeof obj === 'object' && Object.keys(obj).length) ? obj : null;
+  } catch (e) { return null; }
+}
+
+function applySettings(source) {
+  STUDENTS = {};
+  for (var k in source) {
+    if (Object.prototype.hasOwnProperty.call(source, k)) {
+      STUDENTS[String(k).toLowerCase()] = normaliseStudent(String(k).toLowerCase(), source[k]);
+    }
+  }
+}
+
+/** Cached settings win over the config.js fallback. */
+function loadSettings() {
+  applySettings(readCachedSettings() || (window.MATH_CONFIG && window.MATH_CONFIG.STUDENTS) || {});
+}
+
+/** Ask the Sheet for the current settings; harmless if it fails. */
+function refreshSettings() {
+  if (!urlLooksSet()) return;
+  var url = CONFIG.SCRIPT_URL + (CONFIG.SCRIPT_URL.indexOf('?') === -1 ? '?' : '&') +
+            'settings=1&t=' + Date.now();
+
+  fetch(url).then(function (r) { return r.json(); }).then(function (data) {
+    if (!data || !data.ok || !data.settings || !Object.keys(data.settings).length) return;
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data.settings)); } catch (e) {}
+
+    // Never move the goalposts mid-session — only refresh while waiting.
+    if (S && acceptingInput) return;
+    applySettings(data.settings);
+    if (studentKey && STUDENTS[studentKey]) {
+      me = STUDENTS[studentKey];
+      paintStart();
+    }
+    paintPicker();
+  }).catch(function () {});
+}
+
+/* ---------------------- who is practising ----------------------- */
+
+function studentFromUrl() {
+  var m = /[?&]student=([^&]+)/i.exec(location.search);
+  return m ? decodeURIComponent(m[1]).trim().toLowerCase() : '';
+}
+
+function chooseStudent(key) {
+  studentKey = key;
+  me = STUDENTS[key];
+  // Keep the URL in step, so adding THIS page to the home screen
+  // remembers which kid it is.
+  try {
+    history.replaceState(null, '', location.pathname + '?student=' + encodeURIComponent(key));
+  } catch (e) {}
+  paintStart();
+  show('screen-start');
+}
+
+function paintPicker() {
+  var list = el('whoList');
+  list.innerHTML = '';
+  var keys = Object.keys(STUDENTS);
+  for (var i = 0; i < keys.length; i++) {
+    (function (k) {
+      var b = document.createElement('button');
+      b.textContent = STUDENTS[k].name;
+      b.addEventListener('click', function () { chooseStudent(k); });
+      list.appendChild(b);
+    })(keys[i]);
+  }
+}
+
+function paintStart() {
+  if (!me) return;
+  el('greeting').textContent = 'Hi ' + me.name + '!';
+  el('startBlurb').innerHTML =
+    me.problemsPerSession + ' multiplication facts<br>' +
+    me.minFactor + ' through ' + me.maxFactor + ' &middot; ' +
+    me.secondsPerProblem + ' seconds each';
+  el('counter').textContent = '1 / ' + me.problemsPerSession;
+  el('ringNum').textContent = String(me.secondsPerProblem);
+  el('switchBtn').hidden = (Object.keys(STUDENTS).length < 2);
+}
+
 /* ---------------------- problem generation --------------------- */
 /* Purely random. Misses are logged for the dashboard, never re-asked. */
 
@@ -266,8 +389,8 @@ function makeProblems(n) {
   for (var i = 0; i < n; i++) {
     var a, b, key, guard = 0;
     do {
-      a = randInt(CONFIG.MIN_FACTOR, CONFIG.MAX_FACTOR);
-      b = randInt(CONFIG.MIN_FACTOR, CONFIG.MAX_FACTOR);
+      a = randInt(me.minFactor, me.maxFactor);
+      b = randInt(me.minFactor, me.maxFactor);
       key = a + 'x' + b;
       guard++;
     } while (CONFIG.AVOID_IMMEDIATE_REPEAT && key === prevKey && guard < 25);
@@ -280,8 +403,10 @@ function makeProblems(n) {
 /* ----------------------------- play ---------------------------- */
 
 function startSession() {
+  if (!me) { show('screen-pick'); return; }
   S = {
-    problems: makeProblems(CONFIG.PROBLEMS_PER_SESSION),
+    problems: makeProblems(me.problemsPerSession),
+    seconds: me.secondsPerProblem,          // frozen for the whole session
     index: 0,
     score: 0,
     missed: [],
@@ -309,14 +434,14 @@ function nextProblem() {
   el('verdict').textContent = '';
   el('verdict').className = 'verdict';
 
-  S.deadline = performance.now() + CONFIG.SECONDS_PER_PROBLEM * 1000;
+  S.deadline = performance.now() + S.seconds * 1000;
   acceptingInput = true;
   tick();
 }
 
 function tick() {
   var left = S.deadline - performance.now();
-  var span = CONFIG.SECONDS_PER_PROBLEM * 1000;
+  var span = S.seconds * 1000;
   var frac = Math.max(0, Math.min(1, left / span));
 
   var arc = el('ringArc');
@@ -420,13 +545,16 @@ function finishSession() {
   show('screen-done');
 
   deliver({
-    student: CONFIG.STUDENT_NAME,
+    studentKey: studentKey,
+    student: me.name,
     timestamp: new Date().toISOString(),
     score: S.score,
     total: total,
     elapsedSeconds: Math.round(elapsed * 10) / 10,
     missed: S.missed
   }, false);
+
+  refreshSettings();     // pick up any dashboard change for the next round
 }
 
 /* ------------------------ sending the result ------------------- */
@@ -438,7 +566,7 @@ function setStatus(kind, html) {
   el('retryBtn').hidden = (kind !== 'failed');
 }
 
-function postSession(payload) {
+function postJson(payload) {
   // text/plain keeps this a "simple" cross-origin request, so the browser
   // sends no OPTIONS preflight — an Apps Script web app cannot answer one.
   var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -472,7 +600,7 @@ function deliver(payload, isRetry) {
 
   setStatus('sending', isRetry ? 'Trying again…' : 'Sending your score…');
 
-  postSession(payload).then(function () {
+  postJson(payload).then(function () {
     dropPending(payload.timestamp);
     setStatus('sent', 'Score sent to your parent. ✅');
     flushPending();
@@ -519,7 +647,7 @@ function flushPending() {
   if (!arr.length) { showPendingNote(); return; }
 
   var next = arr[0];
-  postSession(next).then(function () {
+  postJson(next).then(function () {
     dropPending(next.timestamp);
     flushPending();
   }).catch(function () { showPendingNote(); });
@@ -567,25 +695,40 @@ document.addEventListener('keydown', function (ev) {
 
 el('startBtn').addEventListener('click', startSession);
 el('againBtn').addEventListener('click', startSession);
+el('switchBtn').addEventListener('click', function () { paintPicker(); show('screen-pick'); });
 el('retryBtn').addEventListener('click', function () {
   var arr = readPending();
   if (arr.length) deliver(arr[arr.length - 1], true);
 });
 
 document.addEventListener('visibilitychange', function () {
-  if (document.visibilityState === 'visible' && !acceptingInput) flushPending();
+  if (document.visibilityState === 'visible' && !acceptingInput) {
+    flushPending();
+    refreshSettings();
+  }
 });
 
 (function init() {
-  el('greeting').textContent = 'Hi ' + CONFIG.STUDENT_NAME + '!';
-  el('startBlurb').innerHTML =
-    CONFIG.PROBLEMS_PER_SESSION + ' multiplication facts<br>' +
-    CONFIG.MIN_FACTOR + ' through ' + CONFIG.MAX_FACTOR + ' &middot; ' +
-    CONFIG.SECONDS_PER_PROBLEM + ' seconds each';
-  el('counter').textContent = '1 / ' + CONFIG.PROBLEMS_PER_SESSION;
-  el('ringNum').textContent = String(CONFIG.SECONDS_PER_PROBLEM);
+  loadSettings();
+  paintPicker();
+
+  var wanted = studentFromUrl();
+  var keys = Object.keys(STUDENTS);
+
+  if (wanted && STUDENTS[wanted]) {
+    studentKey = wanted;
+    me = STUDENTS[wanted];
+    paintStart();
+    show('screen-start');
+  } else if (keys.length === 1) {
+    chooseStudent(keys[0]);
+  } else {
+    show('screen-pick');
+  }
+
   showPendingNote();
   flushPending();
+  refreshSettings();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(function () {});
