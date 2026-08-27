@@ -3,10 +3,11 @@
  * Bump CACHE on every deploy that changes any cached file - that is the
  * only cache-busting mechanism here (same rule as Palabritas).
  *
- * config.js is network-first, so editing settings on github.com reaches the
- * phones on the very next open. Everything else is cache-first with a
- * background refresh, which means code changes land on the SECOND open.
- * That lag is normal; remember it when testing.
+ * config.js and the HTML pages are network-first (with a cache fallback), so
+ * a deploy or a settings edit reaches the phones on the very NEXT open. Only
+ * icons and manifests are cache-first. It used to be cache-first across the
+ * board, which meant code landed on the second open - a lag that repeatedly
+ * looked like a broken deploy. Do not put the pages back to cache-first.
  */
 const CACHE = 'mathfacts-v11';
 
