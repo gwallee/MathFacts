@@ -8,7 +8,7 @@
  * background refresh, which means code changes land on the SECOND open.
  * That lag is normal; remember it when testing.
  */
-const CACHE = 'mathfacts-v8';
+const CACHE = 'mathfacts-v9';
 
 const PRECACHE = [
   './',

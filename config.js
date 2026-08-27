@@ -70,6 +70,9 @@ window.MATH_CONFIG = {
 
   /* --- quiz behavior (same for everyone) -------------------------- */
 
+  SOUND: true,                   // chime on a correct answer, buzz on a miss.
+                                 // Each kid can also toggle it on their own
+                                 // start screen; this is just the default.
   SHOW_CORRECT_ON_MISS: true,    // flash "7 × 8 = 56" after a wrong answer
   FEEDBACK_MS_CORRECT: 450,      // how long the green "Yes!" stays up
   FEEDBACK_MS_WRONG: 1700,       // how long the red correction stays up

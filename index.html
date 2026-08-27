@@ -59,6 +59,15 @@
   }
   .who button:active{background:var(--pad-press)}
   .note{margin-top:18px;font-size:13px;color:var(--muted);max-width:300px;line-height:1.5}
+  .record{
+    margin-top:16px;background:var(--card);border-radius:14px;padding:11px 18px;
+    font-size:15px;color:var(--muted);line-height:1.5;
+  }
+  .record b{color:var(--ink);font-weight:800}
+  .record .beat{color:var(--progress);font-weight:800}
+  .compare{margin-top:10px;font-size:16px;font-weight:700;color:var(--muted);min-height:22px}
+  .compare.best{color:#ffd76e}
+  .compare.up{color:var(--good)}
   .switch{
     margin-top:16px;background:none;border:0;color:var(--muted);
     font-size:14px;text-decoration:underline;padding:8px;
@@ -148,7 +157,9 @@
 <section id="screen-start" class="screen">
   <div class="hello" id="greeting">Math Facts</div>
   <div class="sub" id="startBlurb"></div>
+  <div class="record" id="record"></div>
   <button class="big-btn" id="startBtn">Start</button>
+  <button class="switch" id="soundBtn">Sound: on</button>
   <button class="switch" id="switchBtn" hidden>Not you? Switch</button>
   <div class="note" id="pendingNote" hidden></div>
 </section>
@@ -199,6 +210,7 @@
   <div class="result">
     <div class="score" id="finalScore">0</div>
     <div class="of" id="finalOf">out of 20</div>
+    <div class="compare" id="compare"></div>
   </div>
 
   <div class="stats">
@@ -225,6 +237,7 @@
    ------------------------------------------------------------------ */
 var DEFAULTS = {
   SCRIPT_URL: '',
+  SOUND: true,
   SHOW_CORRECT_ON_MISS: true,
   FEEDBACK_MS_CORRECT: 450,
   FEEDBACK_MS_WRONG: 1700,
@@ -249,6 +262,8 @@ var CONFIG = (function () {
 var PENDING_KEY = 'mathfacts_pending_v1';
 var SETTINGS_KEY = 'mathfacts_settings_v1';
 var WHO_KEY = 'mathfacts_student_v1';
+var HISTORY_KEY = 'mathfacts_history_v1';
+var SOUND_KEY = 'mathfacts_sound_v1';
 var RING_C = 201.06;              // 2·π·r for r = 32, matching the SVG above
 
 var STUDENTS = {};                // live settings, keyed by student key
@@ -356,6 +371,102 @@ function refreshSettings() {
   }).catch(function () {});
 }
 
+/* ------------------------ score history ------------------------- */
+/* Kept on the phone, per kid, so "beat your last score" works instantly
+   and with no signal. The Sheet remains the record for the dashboard. */
+
+function readHistory() {
+  try {
+    var raw = localStorage.getItem(HISTORY_KEY);
+    var obj = raw ? JSON.parse(raw) : {};
+    return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : {};
+  } catch (e) { return {}; }
+}
+
+function historyFor(key) {
+  var list = readHistory()[key];
+  return Array.isArray(list) ? list : [];
+}
+
+function pushHistory(key, entry) {
+  var all = readHistory();
+  var list = Array.isArray(all[key]) ? all[key] : [];
+  list.push(entry);
+  all[key] = list.slice(-30);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(all)); } catch (e) {}
+}
+
+/** Best by accuracy, so a change in problem count does not fake a record. */
+function bestOf(list) {
+  var best = null;
+  for (var i = 0; i < list.length; i++) {
+    if (!best || (list[i].s / list[i].n) > (best.s / best.n)) best = list[i];
+  }
+  return best;
+}
+
+/* ---------------------------- sound ----------------------------- */
+/* Synthesized, so there is nothing to download and it works offline.
+   iOS will not start audio outside a user gesture, so the context is
+   created on the first tap and resumed on every session start. */
+
+var audioCtx = null;
+
+function soundOn() {
+  try {
+    var v = localStorage.getItem(SOUND_KEY);
+    return v === null ? (CONFIG.SOUND !== false) : v === '1';
+  } catch (e) { return CONFIG.SOUND !== false; }
+}
+
+function setSoundOn(on) {
+  try { localStorage.setItem(SOUND_KEY, on ? '1' : '0'); } catch (e) {}
+  paintSoundBtn();
+  if (on) { wakeAudio(); blip(880, 0.07, 0.16); }
+}
+
+function paintSoundBtn() {
+  el('soundBtn').textContent = soundOn() ? 'Sound: on' : 'Sound: off';
+}
+
+function wakeAudio() {
+  if (!soundOn()) return;
+  try {
+    if (!audioCtx) {
+      var Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return;
+      audioCtx = new Ctor();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) { audioCtx = null; }
+}
+
+function blip(freq, dur, peak, type, delay) {
+  if (!audioCtx || !soundOn()) return;
+  try {
+    var at = audioCtx.currentTime + (delay || 0);
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.setValueAtTime(freq, at);
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(peak, at + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(at);
+    osc.stop(at + dur + 0.03);
+  } catch (e) {}
+}
+
+function playCorrect() { blip(880, 0.09, 0.20); blip(1318.5, 0.13, 0.18, 'sine', 0.075); }
+function playWrong()   { blip(233.1, 0.15, 0.18, 'triangle'); blip(185, 0.20, 0.16, 'triangle', 0.10); }
+function playFinish() {
+  blip(659.3, 0.11, 0.18, 'sine', 0);
+  blip(830.6, 0.11, 0.18, 'sine', 0.11);
+  blip(987.8, 0.22, 0.20, 'sine', 0.22);
+}
+
 /* ---------------------- who is practicing ----------------------- */
 
 function studentFromUrl() {
@@ -424,6 +535,19 @@ function paintStart() {
   el('counter').textContent = '1 / ' + me.problemsPerSession;
   el('ringNum').textContent = String(me.secondsPerProblem);
   el('switchBtn').hidden = (Object.keys(STUDENTS).length < 2);
+
+  var list = historyFor(studentKey);
+  var rec = el('record');
+  if (!list.length) {
+    rec.textContent = 'First round — good luck!';
+  } else {
+    var last = list[list.length - 1];
+    var best = bestOf(list);
+    rec.innerHTML =
+      'Last time <b>' + last.s + '/' + last.n + '</b>' +
+      ' &middot; Best <b>' + best.s + '/' + best.n + '</b>' +
+      (last.s < last.n ? '<br><span class="beat">Can you beat ' + last.s + '?</span>' : '');
+  }
 }
 
 /* ---------------------- problem generation --------------------- */
@@ -450,6 +574,7 @@ function makeProblems(n) {
 
 function startSession() {
   if (!me) { show('screen-pick'); return; }
+  wakeAudio();          // this call is inside the tap, which iOS requires
   S = {
     problems: makeProblems(me.problemsPerSession),
     seconds: me.secondsPerProblem,          // frozen for the whole session
@@ -531,11 +656,13 @@ function resolveAnswer(timedOut) {
 
   if (isRight) {
     S.score++;
+    playCorrect();
     el('answer').textContent = given;
     el('answer').className = 'answer ok';
     el('verdict').textContent = 'Yes!';
     el('verdict').className = 'verdict ok';
   } else {
+    playWrong();
     S.missed.push({ a: p.a, b: p.b, given: given, timeout: !!timedOut });
     el('answer').textContent = timedOut ? '—' : given;
     el('answer').className = 'answer no';
@@ -556,10 +683,36 @@ function resolveAnswer(timedOut) {
 function finishSession() {
   stopTimer();
   releaseWakeLock();
+  playFinish();
 
   var elapsed = (Date.now() - S.startedAt) / 1000;
   var total = S.problems.length;
   var acc = total ? Math.round((100 * S.score) / total) : 0;
+
+  // Read the record BEFORE this round joins it.
+  var past = historyFor(studentKey);
+  var prevBest = bestOf(past);
+  var prevLast = past.length ? past[past.length - 1] : null;
+  pushHistory(studentKey, { t: Date.now(), s: S.score, n: total, e: Math.round(elapsed) });
+
+  var cmp = el('compare');
+  cmp.className = 'compare';
+  if (prevBest && (S.score / total) > (prevBest.s / prevBest.n)) {
+    cmp.className = 'compare best';
+    cmp.textContent = '🏆 New best! Beat ' + prevBest.s + '/' + prevBest.n;
+  } else if (prevLast) {
+    var diff = S.score - prevLast.s;
+    if (diff > 0) {
+      cmp.className = 'compare up';
+      cmp.textContent = '+' + diff + ' better than last time (' + prevLast.s + '/' + prevLast.n + ')';
+    } else if (diff === 0) {
+      cmp.textContent = 'Same as last time (' + prevLast.s + '/' + prevLast.n + ')';
+    } else {
+      cmp.textContent = 'Last time ' + prevLast.s + '/' + prevLast.n;
+    }
+  } else {
+    cmp.textContent = 'First round done!';
+  }
 
   el('finalScore').textContent = S.score;
   el('finalOf').textContent = 'out of ' + total;
@@ -743,6 +896,7 @@ document.addEventListener('keydown', function (ev) {
 
 el('startBtn').addEventListener('click', startSession);
 el('againBtn').addEventListener('click', startSession);
+el('soundBtn').addEventListener('click', function () { setSoundOn(!soundOn()); });
 el('switchBtn').addEventListener('click', function () { paintPicker(); show('screen-pick'); });
 el('retryBtn').addEventListener('click', function () {
   var arr = readPending();

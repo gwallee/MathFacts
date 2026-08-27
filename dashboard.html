@@ -105,6 +105,9 @@
   .addkid{background:var(--card);border-radius:16px;padding:16px;border:1px dashed var(--line)}
   .addkid .intro{font-size:13px;color:var(--muted);line-height:1.55;margin-bottom:6px}
   .addkid .save{background:var(--good);color:#04211a}
+  .sheetlink{margin-top:22px;text-align:center;font-size:14px}
+  .sheetlink a{color:var(--accent);font-weight:700;text-decoration:none}
+  .sheetlink small{display:block;margin-top:6px;color:var(--muted);font-size:11.5px;line-height:1.5}
 
   .empty{background:var(--card);border-radius:16px;padding:22px;text-align:center;
          color:var(--muted);font-size:14px;line-height:1.55}
@@ -158,6 +161,7 @@ var SETTINGS = {};     // key -> {name, minFactor, maxFactor, ...}
 var ACTIVE = '';       // selected student key
 var PIN_REQUIRED = false;
 var STALE_SCRIPT = false;  // the deployed Apps Script predates the Settings tab
+var SHEET_URL = '';        // handed over by the Apps Script, not stored in the repo
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -207,6 +211,8 @@ function load() {
       SETTINGS = data.settings || {};
       if (!Object.keys(SETTINGS).length) SETTINGS = fallbackStudents();
       PIN_REQUIRED = !!data.pinRequired;
+      SHEET_URL = data.spreadsheetUrl ||
+                  (window.MATH_CONFIG && window.MATH_CONFIG.SHEET_URL) || '';
 
       var keys = studentKeys();
       if (!ACTIVE || keys.indexOf(ACTIVE) === -1) ACTIVE = keys[0] || '';
@@ -536,6 +542,15 @@ function addKidCard() {
   return html;
 }
 
+/** Escape hatch: the raw Sheet, for when you want to see or fix the data. */
+function sheetLink() {
+  if (!SHEET_URL) return '';
+  return '<div class="sheetlink"><a href="' + esc(SHEET_URL) + '" target="_blank" ' +
+         'rel="noopener">Open the results Sheet &nearr;</a>' +
+         '<small>Opens in Google Sheets. You need to be signed in to the account ' +
+         'that owns it.</small></div>';
+}
+
 /** 'Sam O.' -> 'sam'. Must match the key rule the Apps Script enforces. */
 function keyFromName(name) {
   var key = String(name).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20);
@@ -695,6 +710,7 @@ function render() {
             '<br><br>Once a round is finished on the quiz app, it shows up here.</div>';
     html += settingsCard(key);
     if (!STALE_SCRIPT) html += addKidCard();
+    html += sheetLink();
     el('content').innerHTML = html;
     wireSettings(key);
     wireAddKid();
@@ -828,6 +844,7 @@ function render() {
   /* ---- settings ---- */
   html += settingsCard(key);
   if (!STALE_SCRIPT) html += addKidCard();
+    html += sheetLink();
 
   el('content').innerHTML = html;
   wireSettings(key);

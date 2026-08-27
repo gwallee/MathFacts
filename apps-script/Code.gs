@@ -433,7 +433,12 @@ function doGet(e) {
       count: sessions.length,
       sessions: sessions,
       settings: readSettings_(),
-      pinRequired: !!CONFIG.PARENT_PIN
+      pinRequired: !!CONFIG.PARENT_PIN,
+      // Handed to the dashboard so it can link to the Sheet. Deliberately
+      // served from here rather than written into config.js, which is public
+      // on GitHub — this way the spreadsheet id is not in the repo. Opening
+      // it still requires a Google account with access.
+      spreadsheetUrl: SpreadsheetApp.getActiveSpreadsheet().getUrl()
     });
 
   } catch (err) {
