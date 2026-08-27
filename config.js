@@ -48,7 +48,7 @@ window.MATH_CONFIG = {
     },
     daniel: {
       name: 'Daniel',
-      minFactor: 1,
+      minFactor: 2,
       maxFactor: 14,
       problemsPerSession: 20,
       secondsPerProblem: 10
