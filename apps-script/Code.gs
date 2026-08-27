@@ -511,8 +511,45 @@ function getSettingsSheet_() {
               s.problemsPerSession, s.secondsPerProblem, now];
     });
     sh.getRange(2, 1, seed.length, SETTINGS_HEADERS.length).setValues(seed);
+    return sh;
   }
+
+  ensureDefaultStudents_(sh);
   return sh;
+}
+
+
+/**
+ * Add any DEFAULT_STUDENTS missing from an existing Settings tab, leaving
+ * every row that is already there alone.
+ *
+ * Without this, seeding only happened when the tab was empty — so a kid added
+ * to the script later never reached the Sheet, showed up in the quiz picker
+ * anyway (that list comes from config.js), and then had every session refused
+ * as an unknown student. That failure is nearly impossible to read from the
+ * quiz screen, so it is worth preventing here.
+ */
+function ensureDefaultStudents_(sh) {
+  var lastRow = sh.getLastRow();
+  var existing = {};
+
+  if (lastRow > 1) {
+    var keys = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < keys.length; i++) {
+      var k = String(keys[i][0] == null ? '' : keys[i][0]).trim().toLowerCase();
+      if (k) existing[k] = true;
+    }
+  }
+
+  var missing = DEFAULT_STUDENTS.filter(function (s) { return !existing[s.key]; });
+  if (!missing.length) return;
+
+  var now = new Date().toISOString();
+  var rows = missing.map(function (s) {
+    return [s.key, s.name, s.minFactor, s.maxFactor,
+            s.problemsPerSession, s.secondsPerProblem, now];
+  });
+  sh.getRange(sh.getLastRow() + 1, 1, rows.length, SETTINGS_HEADERS.length).setValues(rows);
 }
 
 

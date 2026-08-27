@@ -22,10 +22,11 @@
     --bg:#0b1220; --card:#161f36; --ink:#f3f6ff; --muted:#9fb0d0;
     --accent:#4f9cff; --good:#31c48d; --bad:#f96a6a;
     --pad:#233150; --pad-press:#31446e;
-    /* Session progress is deliberately desaturated and NOT --accent: the
-       countdown ring owns the saturated blue/amber/red palette, and a bright
-       bar next to it reads as time left rather than problems done. */
-    --progress:#7d8bb0; --progress-track:#1a2338;
+    /* Session progress must NOT be --accent: the countdown ring owns the
+       blue/amber/red palette, and a bar in those colors reads as time left
+       rather than problems done. Violet is outside the timer palette and
+       outside the green used for correct answers. */
+    --progress:#a78bfa; --progress-track:#1a2338;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%}
@@ -122,6 +123,8 @@
   .status.sending{background:#1b2540;color:var(--muted)}
   .status.sent{background:#11331f;color:#8ff0c4}
   .status.failed{background:#3a1c1c;color:#ffc9c9}
+  /* The reason is for the parent, not the kid - small and out of the way. */
+  .status .why{display:block;margin-top:9px;font-size:12px;opacity:.7;font-family:ui-monospace,Menlo,Consolas,monospace}
   .again{
     margin:14px 0 6px;width:100%;border:0;border-radius:18px;padding:18px;
     font-size:20px;font-weight:800;background:var(--pad);color:var(--ink);
@@ -258,6 +261,12 @@ var wakeLock = null;
 var acceptingInput = false;
 
 function el(id) { return document.getElementById(id); }
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
 
 /* --------------------------- helpers --------------------------- */
 
@@ -634,11 +643,13 @@ function deliver(payload, isRetry) {
     dropPending(payload.timestamp);
     setStatus('sent', 'Score sent to your parent. ✅');
     flushPending();
-  }).catch(function () {
+  }).catch(function (err) {
     queuePending(payload);
+    var why = (err && err.message) ? String(err.message).slice(0, 80) : 'no reply';
     setStatus('failed',
       'Could not send your score right now.<br><b>Show this screen to a parent</b> ' +
-      'before you close it. It will send itself next time you open the app on wifi.');
+      'before you close it. It will send itself next time you open the app on wifi.' +
+      '<span class="why">' + esc(payload.studentKey + ': ' + why) + '</span>');
   });
 }
 
