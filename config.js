@@ -24,11 +24,11 @@ window.MATH_CONFIG = {
   SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyfRXckmyLa3X-2yskiLYY0mdN1k-O3mi579G2AsOMwuLD2cHHw8fbW6I19DfmthMwEUw/exec',
 
 
-  /* --- who practises ---------------------------------------------- */
+  /* --- who practices ---------------------------------------------- */
   /* Each kid gets their own link:                                     */
   /*   .../MathFacts/?student=caleb                                    */
   /*   .../MathFacts/?student=ellie                                    */
-  /* Opening the plain URL shows a "who's practising?" picker.         */
+  /* Opening the plain URL shows a "who's practicing?" picker.         */
   /* To add a third kid, add a key here AND on the dashboard.          */
 
   STUDENTS: {
@@ -49,7 +49,7 @@ window.MATH_CONFIG = {
   },
 
 
-  /* --- quiz behaviour (same for everyone) -------------------------- */
+  /* --- quiz behavior (same for everyone) -------------------------- */
 
   SHOW_CORRECT_ON_MISS: true,    // flash "7 × 8 = 56" after a wrong answer
   FEEDBACK_MS_CORRECT: 450,      // how long the green "Yes!" stays up

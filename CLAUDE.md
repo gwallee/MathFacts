@@ -50,8 +50,17 @@ in or out.
   network. Live per-kid settings come from the Sheet. Both HTML files carry their own
   `DEFAULTS` object in case `config.js` fails to load entirely.
 - `index.html` — the quiz. Four screens (pick / start / play / done) in one file.
-  - Which kid is decided by `?student=<key>`; no param shows the picker, and choosing
-    there `history.replaceState`s the key into the URL so Add to Home Screen remembers.
+  - Which kid is decided by `?student=<key>` → `localStorage['mathfacts_student_v1']`
+    → picker. Choosing `history.replaceState`s the key back into the URL.
+  - **iOS 16.4+ gotcha (v1.1.1):** Safari now honors web app manifests, so Add to
+    Home Screen installs the manifest's `start_url` and *throws away* `?student=`.
+    Fixed two ways at once: `applyHomeScreenIdentity()` swaps the `<link rel=manifest>`
+    to that kid's own `<key>.webmanifest` (whose `start_url` carries the key, and whose
+    `short_name` labels the icon with their name), and the last kid chosen is
+    remembered on the device as a fallback. A missing `<key>.webmanifest` degrades
+    safely — the manifest is ignored and iOS falls back to the current URL, which
+    still has the query. Do not put `start_url` back into the shared
+    `manifest.webmanifest` as anything but `./`.
   - Settings resolution: `localStorage['mathfacts_settings_v1']` → `config.js`
     fallback, then a background `?settings=1` fetch updates both. `refreshSettings()`
     deliberately **no-ops while a problem is on screen** so the rules never change
@@ -61,7 +70,7 @@ in or out.
     app mid-problem loses that problem — deliberate, it stops the timer being dodged.
 - `dashboard.html` — parent analytics + the settings editor. One tab per kid; every
   chart and the trouble list are filtered to the selected kid. Hand-rolled inline SVG
-  line/bar charts, no libraries. Trouble-fact ranking normalises commutative pairs
+  line/bar charts, no libraries. Trouble-fact ranking normalizes commutative pairs
   (`7×9` ≡ `9×7`) and needs a fact missed in ≥2 of the last 10 sessions before it
   surfaces. The settings card posts `{type:'settings'}` back to the Apps Script and
   shows each kid's `?student=` link for texting to them.
@@ -151,7 +160,7 @@ git push origin main && git push origin main:gh-pages
   picks up the change) with no Google account involved. Worth rebuilding if you touch
   the contract.
 - Service workers **do not register in the Claude Code browser pane** (any script
-  fails with "unknown error when fetching the script"). Test offline behaviour in real
+  fails with "unknown error when fetching the script"). Test offline behavior in real
   Safari.
 
 ## State / history
@@ -162,6 +171,9 @@ git push origin main && git push origin main:gh-pages
   practice settings moved out of `config.js` into the Sheet and made editable on the
   dashboard; optional `PARENT_PIN`; SW caches navigations by bare path so the
   `?student=` links stay offline-capable.
+- v1.1.1 (2026-08-26, current): per-kid manifests + remembered student, because iOS
+  was dropping `?student=` at Add to Home Screen. US spelling throughout — Brian
+  flagged "practising"; use *practicing*, *normalize*, *behavior*.
 - Originally requested as copy-paste code blocks; Brian corrected that mid-build and
   asked for a real app pushed to GitHub like Palabritas.
 - Brian still has to do the Google/ntfy setup in README steps 1–4 before scores go

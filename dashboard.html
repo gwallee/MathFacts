@@ -150,7 +150,7 @@ var CONFIG = (function () {
 
 var PIN_KEY = 'mathfacts_pin_v1';
 
-var ALL = [];          // every session, normalised, oldest first
+var ALL = [];          // every session, normalized, oldest first
 var SETTINGS = {};     // key -> {name, minFactor, maxFactor, ...}
 var ACTIVE = '';       // selected student key
 var PIN_REQUIRED = false;
@@ -193,7 +193,7 @@ function load() {
     .then(function (data) {
       if (!data || !data.ok) throw new Error((data && data.error) || 'bad response');
 
-      ALL = normalise(data.sessions || []);
+      ALL = normalize(data.sessions || []);
       SETTINGS = data.settings || {};
       PIN_REQUIRED = !!data.pinRequired;
 
@@ -215,7 +215,7 @@ function load() {
     });
 }
 
-function normalise(rows) {
+function normalize(rows) {
   var out = rows.map(function (r) {
     var when = new Date(r.timestamp || r.receivedAt);
     if (isNaN(when.getTime())) when = new Date(r.receivedAt);

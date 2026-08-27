@@ -1,8 +1,8 @@
 {
-  "name": "Math Facts",
-  "short_name": "Math Facts",
+  "name": "Math Facts — Ellie",
+  "short_name": "Ellie",
   "description": "Timed multiplication facts practice.",
-  "start_url": "./",
+  "start_url": "./index.html?student=ellie",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

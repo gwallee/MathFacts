@@ -7,7 +7,7 @@ Timed multiplication practice for Caleb and Ellie, plus a parent dashboard.
 - **Dashboard (your phone):** https://gwallee.github.io/MathFacts/dashboard.html
 
 Each kid gets their own link with their own range and timer. Opening the plain
-address instead shows a "who's practising?" picker.
+address instead shows a "who's practicing?" picker.
 
 No accounts and no login anywhere. Results go to one private Google Sheet through a
 Google Apps Script web app, which also pushes a notification to your phone via
@@ -102,8 +102,13 @@ screen):
 3. **Add to Home Screen** → name it `Math Facts` → **Add**.
 
 Launch it from that icon, not from Safari. It then runs full-screen with no address
-bar, and works offline. The `?student=` tag is remembered by the icon, so it always
-opens as the right kid.
+bar, and works offline.
+
+The icon is labelled with the kid's name, and it always opens as the right kid. Two
+things make that true: each kid has their own manifest file (`caleb.webmanifest`,
+`ellie.webmanifest`) whose start address carries their key, and the app also
+remembers the last kid chosen on that phone. So even if iOS drops the `?student=`
+tag at install time — which it does on iOS 16.4 and later — the app puts it back.
 
 ### 6. Bookmark the dashboard on your phone
 
@@ -133,10 +138,15 @@ next time the app opens. Starting values are Caleb 3–12 at 8 seconds, Ellie 1�
 
 ### Adding a third kid
 
-Add a key to the `STUDENTS` block in `config.js`, commit, then open the dashboard —
-the new kid appears as a tab and gets their own `?student=` link. (The Sheet seeds
-itself from `config.js` only on the very first run, so for a later addition you can
-also just add a row to the `Settings` tab by hand.)
+1. Add a key to the `STUDENTS` block in `config.js`.
+2. Copy `ellie.webmanifest` to `<key>.webmanifest` and change the name, short name
+   and `start_url` to match. Without this their home-screen icon still works, it
+   just falls back to remembering the kid rather than carrying it in the URL.
+3. Add the two new filenames to the `PRECACHE` list in `sw.js` and bump `CACHE`.
+
+Commit, then open the dashboard — the new kid appears as a tab with their own link.
+(The Sheet seeds itself from `config.js` only on the very first run, so for a later
+addition you can also add a row to the `Settings` tab by hand.)
 
 ### Locking the settings editor (optional)
 
@@ -193,4 +203,4 @@ answers that were given, which is usually the interesting part.
 - The copy of `Code.gs` in this repo carries a placeholder topic on purpose. The real
   topic exists only in the Apps Script editor.
 - Local testing: `node dev-server.mjs`, then http://localhost:8318. Service workers do
-  not register in embedded browsers — test the offline behaviour in real Safari.
+  not register in embedded browsers — test the offline behavior in real Safari.

@@ -130,10 +130,10 @@
 </head>
 <body>
 
-<!-- ======================= WHO'S PRACTISING ======================= -->
+<!-- ======================= WHO'S PRACTICING ======================= -->
 <section id="screen-pick" class="screen">
   <div class="hello">Math Facts</div>
-  <div class="sub">Who's practising?</div>
+  <div class="sub">Who's practicing?</div>
   <div class="who" id="whoList"></div>
 </section>
 
@@ -241,10 +241,11 @@ var CONFIG = (function () {
 
 var PENDING_KEY = 'mathfacts_pending_v1';
 var SETTINGS_KEY = 'mathfacts_settings_v1';
+var WHO_KEY = 'mathfacts_student_v1';
 var RING_C = 201.06;              // 2·π·r for r = 32, matching the SVG above
 
 var STUDENTS = {};                // live settings, keyed by student key
-var studentKey = '';              // who is practising right now
+var studentKey = '';              // who is practicing right now
 var me = null;                    // STUDENTS[studentKey]
 
 var S = null;                     // live session state
@@ -280,7 +281,7 @@ function urlLooksSet() {
 
 /* ------------------------ student settings ---------------------- */
 
-function normaliseStudent(key, raw) {
+function normalizeStudent(key, raw) {
   raw = raw || {};
   return {
     key: key,
@@ -304,7 +305,7 @@ function applySettings(source) {
   STUDENTS = {};
   for (var k in source) {
     if (Object.prototype.hasOwnProperty.call(source, k)) {
-      STUDENTS[String(k).toLowerCase()] = normaliseStudent(String(k).toLowerCase(), source[k]);
+      STUDENTS[String(k).toLowerCase()] = normalizeStudent(String(k).toLowerCase(), source[k]);
     }
   }
 }
@@ -335,16 +336,40 @@ function refreshSettings() {
   }).catch(function () {});
 }
 
-/* ---------------------- who is practising ----------------------- */
+/* ---------------------- who is practicing ----------------------- */
 
 function studentFromUrl() {
   var m = /[?&]student=([^&]+)/i.exec(location.search);
   return m ? decodeURIComponent(m[1]).trim().toLowerCase() : '';
 }
 
+function rememberStudent(key) {
+  try { localStorage.setItem(WHO_KEY, key); } catch (e) {}
+}
+
+function lastStudent() {
+  try { return (localStorage.getItem(WHO_KEY) || '').toLowerCase(); } catch (e) { return ''; }
+}
+
+/**
+ * iOS 16.4+ installs a home-screen app at the manifest's start_url, throwing
+ * away the ?student= the page was opened with. Point the manifest link at
+ * that kid's own manifest, whose start_url carries their key, so their icon
+ * launches as them. (If a kid has no manifest file the link 404s, the
+ * manifest is ignored, and iOS falls back to the current URL — which still
+ * has the query. Either way it lands on the right kid.)
+ */
+function applyHomeScreenIdentity(key) {
+  var link = document.querySelector('link[rel="manifest"]');
+  if (link) link.setAttribute('href', encodeURIComponent(key) + '.webmanifest');
+  var title = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+  if (title && STUDENTS[key]) title.setAttribute('content', STUDENTS[key].name);
+}
+
 function chooseStudent(key) {
   studentKey = key;
   me = STUDENTS[key];
+  rememberStudent(key);
   // Keep the URL in step, so adding THIS page to the home screen
   // remembers which kid it is.
   try {
@@ -370,6 +395,7 @@ function paintPicker() {
 
 function paintStart() {
   if (!me) return;
+  applyHomeScreenIdentity(studentKey);
   el('greeting').textContent = 'Hi ' + me.name + '!';
   el('startBlurb').innerHTML =
     me.problemsPerSession + ' multiplication facts<br>' +
@@ -712,14 +738,13 @@ document.addEventListener('visibilitychange', function () {
   loadSettings();
   paintPicker();
 
-  var wanted = studentFromUrl();
+  // The URL wins; the remembered kid is the safety net for when iOS has
+  // stripped ?student= off a home-screen launch.
+  var wanted = studentFromUrl() || lastStudent();
   var keys = Object.keys(STUDENTS);
 
   if (wanted && STUDENTS[wanted]) {
-    studentKey = wanted;
-    me = STUDENTS[wanted];
-    paintStart();
-    show('screen-start');
+    chooseStudent(wanted);
   } else if (keys.length === 1) {
     chooseStudent(keys[0]);
   } else {

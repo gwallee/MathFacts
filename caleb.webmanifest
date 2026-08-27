@@ -1,8 +1,8 @@
 {
-  "name": "Math Facts",
-  "short_name": "Math Facts",
+  "name": "Math Facts — Caleb",
+  "short_name": "Caleb",
   "description": "Timed multiplication facts practice.",
-  "start_url": "./",
+  "start_url": "./index.html?student=caleb",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
