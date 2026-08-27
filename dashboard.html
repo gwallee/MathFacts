@@ -154,6 +154,7 @@ var ALL = [];          // every session, normalized, oldest first
 var SETTINGS = {};     // key -> {name, minFactor, maxFactor, ...}
 var ACTIVE = '';       // selected student key
 var PIN_REQUIRED = false;
+var STALE_SCRIPT = false;  // the deployed Apps Script predates the Settings tab
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -194,7 +195,14 @@ function load() {
       if (!data || !data.ok) throw new Error((data && data.error) || 'bad response');
 
       ALL = normalize(data.sessions || []);
+
+      // An Apps Script older than v1.1.0 has no Settings tab and returns no
+      // settings at all. Fall back to the config.js roster so every kid still
+      // gets a tab, and say why the editor is unavailable rather than just
+      // quietly dropping them.
+      STALE_SCRIPT = !data.settings;
       SETTINGS = data.settings || {};
+      if (!Object.keys(SETTINGS).length) SETTINGS = fallbackStudents();
       PIN_REQUIRED = !!data.pinRequired;
 
       var keys = studentKeys();
@@ -235,6 +243,26 @@ function normalize(rows) {
   }).filter(function (s) { return s.total > 0 && !isNaN(s.when.getTime()); });
 
   out.sort(function (a, b) { return a.when - b.when; });   // oldest first
+  return out;
+}
+
+/** The roster from config.js, used when the Sheet has no Settings tab yet. */
+function fallbackStudents() {
+  var src = (window.MATH_CONFIG && window.MATH_CONFIG.STUDENTS) || {};
+  var out = {};
+  for (var k in src) {
+    if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
+    var key = String(k).toLowerCase();
+    var s = src[k] || {};
+    out[key] = {
+      key: key,
+      name: String(s.name || key),
+      minFactor: Number(s.minFactor) || 1,
+      maxFactor: Number(s.maxFactor) || 12,
+      problemsPerSession: Number(s.problemsPerSession) || 20,
+      secondsPerProblem: Number(s.secondsPerProblem) || 10
+    };
+  }
   return out;
 }
 
@@ -438,6 +466,23 @@ function settingsCard(key) {
   var quizUrl = location.origin + location.pathname.replace(/dashboard\.html$/, '') +
                 '?student=' + encodeURIComponent(key);
 
+  if (STALE_SCRIPT) {
+    return '<h2>' + esc(s.name) + '&rsquo;s settings</h2>' +
+           '<div class="err"><b>The settings editor needs a newer Apps Script.</b><br>' +
+           'The one deployed right now is from v1.0.0 — it has no <code>Settings</code> ' +
+           'tab, so it cannot store changes, it only accepts sessions for one child, ' +
+           'and it cannot tell the kids apart.<br><br>' +
+           'Fix: open the Sheet &rarr; <b>Extensions &rarr; Apps Script</b>, replace the ' +
+           'code with the current <code>apps-script/Code.gs</code> from the repo, then ' +
+           '<b>Deploy &rarr; Manage deployments &rarr; pencil &rarr; Version: New version ' +
+           '&rarr; Deploy</b>. Reload this page afterwards.<br><br>' +
+           'Meanwhile ' + esc(s.name) + ' practices ' + s.minFactor + '&ndash;' +
+           s.maxFactor + ' at ' + s.secondsPerProblem + 's, from <code>config.js</code>.' +
+           '</div>' +
+           '<div class="link" style="margin-top:10px"><b>' + esc(s.name) +
+           '&rsquo;s quiz link</b><br>' + esc(quizUrl) + '</div>';
+  }
+
   var html = '<h2>' + esc(s.name) + '&rsquo;s settings</h2><div class="settings">';
 
   html += field_('setName', 'Name', 'shown on the quiz screen', s.name, 'text');
@@ -532,6 +577,14 @@ function render() {
   el('title').textContent = displayName(key) || 'Math Facts';
 
   var html = '';
+
+  if (STALE_SCRIPT) {
+    html += '<div class="err" style="margin-bottom:16px">' +
+            '<b>Your Apps Script is out of date.</b> It is not storing which child a ' +
+            'session belongs to, so every round shows up under one name and the ' +
+            'settings editor is disabled. See the bottom of this page for the fix.' +
+            '</div>';
+  }
 
   if (!sessions.length) {
     html += '<div class="empty">No sessions logged for ' + esc(displayName(key)) + ' yet.' +

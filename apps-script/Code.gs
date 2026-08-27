@@ -105,7 +105,17 @@ function saveSession_(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    getSessionsSheet_().appendRow([
+    var sheet = getSessionsSheet_();
+
+    // The phone retries anything it did not get a reply for, so a store that
+    // succeeded here but whose response was lost arrives again. One session is
+    // one (studentKey, timestamp), so treat a repeat as already done and let
+    // the phone clear it from its queue.
+    if (alreadyStored_(sheet, s)) {
+      return json_({ ok: true, stored: true, duplicate: true, pushed: false });
+    }
+
+    sheet.appendRow([
       s.timestamp,
       new Date().toISOString(),
       s.studentKey,
@@ -188,6 +198,26 @@ function validateSession_(p, settings) {
       missed: missed
     }
   };
+}
+
+
+/** Has this exact (studentKey, timestamp) already been appended? */
+function alreadyStored_(sheet, s) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+
+  // A retry always lands within a few rows of the original, so only the tail
+  // is worth scanning.
+  var startRow = Math.max(2, lastRow - 50);
+  var values = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
+
+  for (var i = 0; i < values.length; i++) {
+    if (cellToIso_(values[i][0]) === s.timestamp &&
+        String(values[i][2] || '').toLowerCase() === s.studentKey) {
+      return true;
+    }
+  }
+  return false;
 }
 
 
@@ -420,8 +450,41 @@ function getSessionsSheet_() {
     // Keep the ISO timestamps as plain text so Sheets does not quietly
     // reformat them into locale date values on the way back out.
     sh.getRange('A:B').setNumberFormat('@');
+    return sh;
   }
+
+  migrateSessionsSheet_(sh);
   return sh;
+}
+
+
+/**
+ * v1.0.0 wrote 10 columns with the display name in C and no StudentKey.
+ * v1.1.0 writes 11 with the key in C. Without this, old rows would be read
+ * one column out of step and come back as nonsense. Idempotent: it checks
+ * the header and does nothing once the sheet is current.
+ */
+function migrateSessionsSheet_(sh) {
+  var width = Math.max(sh.getLastColumn(), 1);
+  var header = sh.getRange(1, 1, 1, width).getValues()[0];
+
+  if (String(header[2]) === 'StudentKey') return;   // already migrated
+  if (String(header[2]) !== 'Student') return;      // not a shape we know; leave it alone
+
+  sh.insertColumnBefore(3);
+  sh.getRange(1, 3).setValue('StudentKey');
+
+  var lastRow = sh.getLastRow();
+  if (lastRow > 1) {
+    // The display name has shifted into D; derive the key from it.
+    var names = sh.getRange(2, 4, lastRow - 1, 1).getValues();
+    var keys = names.map(function (r) {
+      return [String(r[0] == null ? '' : r[0]).trim().toLowerCase()];
+    });
+    sh.getRange(2, 3, keys.length, 1).setValues(keys);
+  }
+
+  sh.getRange(1, 1, 1, HEADERS.length).setFontWeight('bold');
 }
 
 

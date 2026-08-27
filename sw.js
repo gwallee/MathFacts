@@ -8,7 +8,7 @@
  * background refresh, which means code changes land on the SECOND open.
  * That lag is normal; remember it when testing.
  */
-const CACHE = 'mathfacts-v3';
+const CACHE = 'mathfacts-v4';
 
 const PRECACHE = [
   './',
@@ -57,9 +57,12 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   // Settings: network-first so an edit to config.js applies immediately.
+  // no-store matters — GitHub Pages serves config.js with max-age=600, and
+  // without this the browser's own HTTP cache can hand back a copy up to ten
+  // minutes stale, which is long enough to look like a broken deploy.
   if (url.pathname.endsWith('/config.js')) {
     event.respondWith(
-      fetch(req)
+      fetch(new Request(req.url, { cache: 'no-store' }))
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
