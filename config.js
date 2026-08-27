@@ -37,14 +37,21 @@ window.MATH_CONFIG = {
       minFactor: 3,            // no ×2 problems
       maxFactor: 12,
       problemsPerSession: 20,
-      secondsPerProblem: 8
+      secondsPerProblem: 12
     },
     ellie: {
       name: 'Ellie',
       minFactor: 1,
       maxFactor: 10,
+      problemsPerSession: 10,
+      secondsPerProblem: 20
+    },
+    daniel: {
+      name: 'Daniel',
+      minFactor: 1,
+      maxFactor: 14,
       problemsPerSession: 20,
-      secondsPerProblem: 12
+      secondsPerProblem: 10
     }
   },
 
