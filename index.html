@@ -317,7 +317,10 @@ function normalizeStudent(key, raw) {
     minFactor: Number(raw.minFactor) || 1,
     maxFactor: Number(raw.maxFactor) || 12,
     problemsPerSession: Number(raw.problemsPerSession) || 20,
-    secondsPerProblem: Number(raw.secondsPerProblem) || 10
+    secondsPerProblem: Number(raw.secondsPerProblem) || 10,
+    focus: (raw.focus === '' || raw.focus === null || raw.focus === undefined ||
+            !isFinite(Number(raw.focus)) || Number(raw.focus) <= 0)
+             ? '' : Math.round(Number(raw.focus))
   };
 }
 
@@ -381,6 +384,15 @@ function readHistory() {
     var obj = raw ? JSON.parse(raw) : {};
     return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : {};
   } catch (e) { return {}; }
+}
+
+/**
+ * Bests are kept per mode. A 20/20 on the 3s is a much easier round than
+ * 20/20 mixed, so letting them share a record would make "beat your best"
+ * meaningless the moment a table is picked.
+ */
+function histKey(key, focus) {
+  return key + ((focus === '' || focus === undefined) ? '' : '#' + focus);
 }
 
 function historyFor(key) {
@@ -529,17 +541,23 @@ function paintStart() {
   applyHomeScreenIdentity(studentKey);
   el('greeting').textContent = 'Hi ' + me.name + '!';
   el('startBlurb').innerHTML =
-    me.problemsPerSession + ' multiplication facts<br>' +
-    me.minFactor + ' through ' + me.maxFactor + ' &middot; ' +
-    me.secondsPerProblem + ' seconds each';
+    (me.focus === ''
+      ? me.problemsPerSession + ' multiplication facts<br>' +
+        me.minFactor + ' through ' + me.maxFactor
+      : '<b>The ' + me.focus + 's</b><br>' +
+        me.problemsPerSession + ' problems, ' + me.focus + '&times;' + me.minFactor +
+        ' to ' + me.focus + '&times;' + me.maxFactor) +
+    ' &middot; ' + me.secondsPerProblem + ' seconds each';
   el('counter').textContent = '1 / ' + me.problemsPerSession;
   el('ringNum').textContent = String(me.secondsPerProblem);
   el('switchBtn').hidden = (Object.keys(STUDENTS).length < 2);
 
-  var list = historyFor(studentKey);
+  var list = historyFor(histKey(studentKey, me.focus));
   var rec = el('record');
   if (!list.length) {
-    rec.textContent = 'First round — good luck!';
+    rec.textContent = me.focus === ''
+      ? 'First round — good luck!'
+      : 'First time on the ' + me.focus + 's — good luck!';
   } else {
     var last = list[list.length - 1];
     var best = bestOf(list);
@@ -553,7 +571,55 @@ function paintStart() {
 /* ---------------------- problem generation --------------------- */
 /* Purely random. Misses are logged for the dashboard, never re-asked. */
 
+function shuffled(arr) {
+  var a = arr.slice();
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+/**
+ * One table, e.g. 12: every fact from 12×min to 12×max, shuffled, with the
+ * orientation flipped at random so both 12×9 and 9×12 turn up. Dealt from a
+ * reshuffled deck rather than picked at random, so a session covers the whole
+ * table evenly instead of repeating some facts and skipping others.
+ */
+function makeFocusProblems(n, focus) {
+  var pool = [];
+  for (var v = me.minFactor; v <= me.maxFactor; v++) pool.push(v);
+  if (!pool.length) pool = [focus];
+
+  var out = [];
+  var deck = [];
+  var prevKey = '';
+
+  while (out.length < n) {
+    if (!deck.length) deck = shuffled(pool);
+    var other = deck.pop();
+    var flip = Math.random() < 0.5;
+    var a = flip ? focus : other;
+    var b = flip ? other : focus;
+
+    // Only possible across a deck boundary, and only worth one retry.
+    if (a + 'x' + b === prevKey && deck.length) {
+      deck.unshift(other);
+      other = deck.pop();
+      a = flip ? focus : other;
+      b = flip ? other : focus;
+    }
+
+    prevKey = a + 'x' + b;
+    out.push({ a: a, b: b });
+  }
+  return out;
+}
+
 function makeProblems(n) {
+  var focus = Number(me.focus);
+  if (isFinite(focus) && focus > 0) return makeFocusProblems(n, focus);
+
   var out = [];
   var prevKey = '';
   for (var i = 0; i < n; i++) {
@@ -578,6 +644,7 @@ function startSession() {
   S = {
     problems: makeProblems(me.problemsPerSession),
     seconds: me.secondsPerProblem,          // frozen for the whole session
+    focus: me.focus,                        // ditto — recorded with the result
     index: 0,
     score: 0,
     missed: [],
@@ -689,11 +756,13 @@ function finishSession() {
   var total = S.problems.length;
   var acc = total ? Math.round((100 * S.score) / total) : 0;
 
-  // Read the record BEFORE this round joins it.
-  var past = historyFor(studentKey);
+  // Read the record BEFORE this round joins it, and keep each mode's record
+  // separate so a drilled table cannot set the mixed-round best.
+  var hk = histKey(studentKey, S.focus);
+  var past = historyFor(hk);
   var prevBest = bestOf(past);
   var prevLast = past.length ? past[past.length - 1] : null;
-  pushHistory(studentKey, { t: Date.now(), s: S.score, n: total, e: Math.round(elapsed) });
+  pushHistory(hk, { t: Date.now(), s: S.score, n: total, e: Math.round(elapsed) });
 
   var cmp = el('compare');
   cmp.className = 'compare';
@@ -750,6 +819,7 @@ function finishSession() {
     score: S.score,
     total: total,
     elapsedSeconds: Math.round(elapsed * 10) / 10,
+    mode: S.focus === '' ? '' : S.focus,
     missed: S.missed
   }, false);
 

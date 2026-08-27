@@ -41,13 +41,15 @@ var CONFIG = {
 // Keep this list in step with STUDENTS in config.js. A kid who is in config.js
 // but NOT here appears in the quiz picker and is then refused by doPost as an
 // unknown student, which is a confusing way to fail.
+// focus: '' means a mixed round. A number drills that table, e.g. 12 gives
+// 12×3 … 12×12 shuffled, with the orientation flipped at random.
 var DEFAULT_STUDENTS = [
   { key: 'caleb', name: 'Caleb', minFactor: 3, maxFactor: 12,
-    problemsPerSession: 20, secondsPerProblem: 12 },
+    problemsPerSession: 20, secondsPerProblem: 12, focus: '' },
   { key: 'ellie', name: 'Ellie', minFactor: 1, maxFactor: 10,
-    problemsPerSession: 10, secondsPerProblem: 20 },
+    problemsPerSession: 10, secondsPerProblem: 20, focus: '' },
   { key: 'daniel', name: 'Daniel', minFactor: 2, maxFactor: 12,
-    problemsPerSession: 20, secondsPerProblem: 14 }
+    problemsPerSession: 20, secondsPerProblem: 14, focus: '' }
 ];
 // ====================================================================
 
@@ -62,12 +64,16 @@ var HEADERS = [
   'ElapsedSeconds',   // H
   'AvgSecPerProblem', // I
   'MissedCount',      // J
-  'Missed'            // K - JSON: [{a,b,correct,given,timeout}, ...]
+  'Missed',           // K - JSON: [{a,b,correct,given,timeout}, ...]
+  'Mode'              // L - '' for a mixed round, or the table drilled, e.g. 12
 ];
 
+// Focus is appended rather than slotted in before UpdatedAt on purpose: adding
+// a column at the end needs no data shuffling, so an existing Settings tab
+// upgrades itself by writing one header cell.
 var SETTINGS_HEADERS = [
   'Key', 'Name', 'MinFactor', 'MaxFactor', 'ProblemsPerSession',
-  'SecondsPerProblem', 'UpdatedAt'
+  'SecondsPerProblem', 'UpdatedAt', 'Focus'
 ];
 
 // Guard rails applied to whatever the dashboard sends.
@@ -132,7 +138,8 @@ function saveSession_(payload) {
       s.elapsedSeconds,
       s.total ? Math.round((s.elapsedSeconds / s.total) * 100) / 100 : 0,
       s.missed.length,
-      JSON.stringify(s.missed)
+      JSON.stringify(s.missed),
+      s.mode === '' ? '' : s.mode
     ]);
   } finally {
     lock.releaseLock();
@@ -201,7 +208,8 @@ function validateSession_(p, settings) {
       score: score,
       total: total,
       elapsedSeconds: Math.round(elapsed * 10) / 10,
-      missed: missed
+      missed: missed,
+      mode: normalizeFocus_(p.mode)
     }
   };
 }
@@ -259,7 +267,7 @@ function saveSettings_(payload) {
 
     var incoming = payload.students[keys[i]] || {};
     var base = current[key] || { key: key, name: key, minFactor: 2, maxFactor: 12,
-                                 problemsPerSession: 20, secondsPerProblem: 10 };
+                                 problemsPerSession: 20, secondsPerProblem: 10, focus: '' };
 
     var name = String(incoming.name == null ? base.name : incoming.name).trim().slice(0, 30);
     if (!name) return json_({ ok: false, error: 'name cannot be empty' });
@@ -275,12 +283,26 @@ function saveSettings_(payload) {
       maxFactor: maxF,
       problemsPerSession: clampInt_(incoming.problemsPerSession, base.problemsPerSession, LIMITS.problems),
       secondsPerProblem: clampInt_(incoming.secondsPerProblem, base.secondsPerProblem, LIMITS.seconds),
+      focus: (incoming.focus === undefined) ? (base.focus || '') : normalizeFocus_(incoming.focus),
       updatedAt: new Date().toISOString()
     };
   }
 
   writeSettings_(current);
   return json_({ ok: true, saved: true, settings: readSettings_() });
+}
+
+
+/**
+ * '' for a mixed round, otherwise the table being drilled as a number.
+ * Anything unparseable becomes '' — a bad value should mean "mixed", never
+ * a broken session.
+ */
+function normalizeFocus_(value) {
+  if (value === null || value === undefined || value === '') return '';
+  var n = Math.round(Number(value));
+  if (!isFinite(n) || n < LIMITS.factor.min || n > LIMITS.factor.max) return '';
+  return n;
 }
 
 
@@ -309,7 +331,8 @@ function readSettings_() {
       maxFactor: Number(r[3]) || 12,
       problemsPerSession: Number(r[4]) || 20,
       secondsPerProblem: Number(r[5]) || 10,
-      updatedAt: cellToIso_(r[6])
+      updatedAt: cellToIso_(r[6]),
+      focus: normalizeFocus_(r[7])
     };
   }
   return out;
@@ -323,7 +346,8 @@ function writeSettings_(settingsObj) {
     var s = settingsObj[k];
     return [s.key, s.name, s.minFactor, s.maxFactor,
             s.problemsPerSession, s.secondsPerProblem,
-            s.updatedAt || new Date().toISOString()];
+            s.updatedAt || new Date().toISOString(),
+            (s.focus === '' || s.focus === undefined) ? '' : s.focus];
   });
 
   var lock = LockService.getScriptLock();
@@ -344,7 +368,8 @@ function writeSettings_(settingsObj) {
 /* ------------------------------- ntfy ------------------------------- */
 
 function notify_(s) {
-  var body = 'Finished: ' + s.score + '/' + s.total + ' in ' + mmss_(s.elapsedSeconds);
+  var body = 'Finished: ' + s.score + '/' + s.total + ' in ' + mmss_(s.elapsedSeconds) +
+             (s.mode === '' ? '' : ' (' + s.mode + 'x table)');
 
   if (s.missed.length) {
     body += '\nMissed: ' + s.missed.map(function (m) {
@@ -423,7 +448,8 @@ function doGet(e) {
           elapsedSeconds: Number(r[7]) || 0,
           avgSecPerProblem: Number(r[8]) || 0,
           missedCount: Number(r[9]) || 0,
-          missed: missed
+          missed: missed,
+          mode: normalizeFocus_(r[11])
         });
       }
     }
@@ -465,6 +491,7 @@ function getSessionsSheet_() {
   }
 
   migrateSessionsSheet_(sh);
+  ensureHeaders_(sh, HEADERS);
   return sh;
 }
 
@@ -499,6 +526,23 @@ function migrateSessionsSheet_(sh) {
 }
 
 
+/**
+ * Later versions add columns at the END of a tab, so upgrading an existing
+ * sheet is just writing the header row — no data moves, and old rows simply
+ * have the new cells blank. Safe to run every time.
+ */
+function ensureHeaders_(sh, headers) {
+  var current = sh.getRange(1, 1, 1, headers.length).getValues()[0];
+  for (var i = 0; i < headers.length; i++) {
+    if (String(current[i]) !== headers[i]) {
+      sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sh.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+      return;
+    }
+  }
+}
+
+
 function getSettingsSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName(CONFIG.SETTINGS_SHEET);
@@ -513,12 +557,13 @@ function getSettingsSheet_() {
     var now = new Date().toISOString();
     var seed = DEFAULT_STUDENTS.map(function (s) {
       return [s.key, s.name, s.minFactor, s.maxFactor,
-              s.problemsPerSession, s.secondsPerProblem, now];
+              s.problemsPerSession, s.secondsPerProblem, now, s.focus || ''];
     });
     sh.getRange(2, 1, seed.length, SETTINGS_HEADERS.length).setValues(seed);
     return sh;
   }
 
+  ensureHeaders_(sh, SETTINGS_HEADERS);
   ensureDefaultStudents_(sh);
   return sh;
 }
@@ -552,7 +597,7 @@ function ensureDefaultStudents_(sh) {
   var now = new Date().toISOString();
   var rows = missing.map(function (s) {
     return [s.key, s.name, s.minFactor, s.maxFactor,
-            s.problemsPerSession, s.secondsPerProblem, now];
+            s.problemsPerSession, s.secondsPerProblem, now, s.focus || ''];
   });
   sh.getRange(sh.getLastRow() + 1, 1, rows.length, SETTINGS_HEADERS.length).setValues(rows);
 }

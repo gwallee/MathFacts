@@ -44,6 +44,24 @@
   h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;
      color:var(--muted);margin:26px 0 10px;font-weight:800}
 
+  /* Collapsible sections. <details> so it works without JS; the open/closed
+     choice is remembered per section on this device. */
+  details.sec{margin:22px 0 0}
+  details.sec > summary{
+    list-style:none;cursor:pointer;user-select:none;
+    font-size:13px;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--muted);font-weight:800;padding:6px 0 10px;
+    display:flex;align-items:center;gap:8px;
+  }
+  details.sec > summary::-webkit-details-marker{display:none}
+  details.sec > summary::before{
+    content:'';width:0;height:0;flex:none;
+    border-left:5px solid var(--muted);border-top:4px solid transparent;
+    border-bottom:4px solid transparent;transition:transform .15s;
+  }
+  details.sec[open] > summary::before{transform:rotate(90deg)}
+  details.sec > summary:hover{color:var(--ink)}
+
   .tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
   .tile{background:var(--card);border-radius:16px;padding:14px}
   .tile b{display:block;font-size:26px;font-weight:800;line-height:1.15}
@@ -89,6 +107,11 @@
     font-family:inherit;
   }
   .field input[type=text]{width:130px;text-align:left;font-weight:600}
+  .field select{
+    width:130px;flex:none;background:#0d1424;border:1px solid var(--line);color:var(--ink);
+    border-radius:10px;padding:11px;font-size:15px;font-weight:700;font-family:inherit;
+  }
+  .session .when small b.mode{color:#a78bfa;font-weight:800}
   .field input:focus{outline:2px solid var(--accent);border-color:transparent}
   .save{
     margin-top:14px;width:100%;border:0;border-radius:14px;padding:15px;
@@ -102,6 +125,8 @@
     font-size:12px;color:var(--muted);line-height:1.6;word-break:break-all;
   }
   .link b{color:var(--ink);font-weight:700}
+  .link a{color:var(--accent);font-weight:600;text-decoration:none;word-break:break-all}
+  .link a:hover{text-decoration:underline}
   .addkid{background:var(--card);border-radius:16px;padding:16px;border:1px dashed var(--line)}
   .addkid .intro{font-size:13px;color:var(--muted);line-height:1.55;margin-bottom:6px}
   .addkid .save{background:var(--good);color:#04211a}
@@ -155,6 +180,33 @@ var CONFIG = (function () {
 })();
 
 var PIN_KEY = 'mathfacts_pin_v1';
+var SEC_KEY = 'mathfacts_sec_v1_';
+
+/** Remembered per section, per device, so the layout stays how you left it. */
+function sectionOpen(id, dflt) {
+  try {
+    var v = localStorage.getItem(SEC_KEY + id);
+    return v === null ? dflt : v === '1';
+  } catch (e) { return dflt; }
+}
+
+function section(id, title, inner, defaultOpen) {
+  return '<details class="sec" data-sec="' + esc(id) + '"' +
+         (sectionOpen(id, defaultOpen !== false) ? ' open' : '') + '>' +
+         '<summary>' + title + '</summary>' + inner + '</details>';
+}
+
+function wireSections() {
+  var all = document.querySelectorAll('details.sec');
+  for (var i = 0; i < all.length; i++) {
+    (function (d) {
+      d.addEventListener('toggle', function () {
+        try { localStorage.setItem(SEC_KEY + d.getAttribute('data-sec'), d.open ? '1' : '0'); }
+        catch (e) {}
+      });
+    })(all[i]);
+  }
+}
 
 var ALL = [];          // every session, normalized, oldest first
 var SETTINGS = {};     // key -> {name, minFactor, maxFactor, ...}
@@ -247,6 +299,7 @@ function normalize(rows) {
       accuracy: total ? (Number(r.score) || 0) / total : 0,
       elapsed: elapsed,
       perProblem: total ? elapsed / total : 0,
+      mode: (r.mode === null || r.mode === undefined || r.mode === '') ? '' : String(r.mode),
       missed: Array.isArray(r.missed) ? r.missed : []
     };
   }).filter(function (s) { return s.total > 0 && !isNaN(s.when.getTime()); });
@@ -269,7 +322,8 @@ function fallbackStudents() {
       minFactor: Number(s.minFactor) || 1,
       maxFactor: Number(s.maxFactor) || 12,
       problemsPerSession: Number(s.problemsPerSession) || 20,
-      secondsPerProblem: Number(s.secondsPerProblem) || 10
+      secondsPerProblem: Number(s.secondsPerProblem) || 10,
+      focus: (s.focus === undefined || s.focus === null) ? '' : s.focus
     };
   }
   return out;
@@ -468,7 +522,7 @@ function barChart(items) {
 function settingsCard(key) {
   var s = SETTINGS[key];
   if (!s) {
-    return '<h2>Settings</h2><div class="empty">' + esc(displayName(key)) +
+    return '<div class="empty">' + esc(displayName(key)) +
            ' has sessions but no settings row in the Sheet yet.</div>';
   }
 
@@ -476,8 +530,7 @@ function settingsCard(key) {
                 '?student=' + encodeURIComponent(key);
 
   if (STALE_SCRIPT) {
-    return '<h2>' + esc(s.name) + '&rsquo;s settings</h2>' +
-           '<div class="err"><b>The settings editor needs a newer Apps Script.</b><br>' +
+    return '<div class="err"><b>The settings editor needs a newer Apps Script.</b><br>' +
            'The one deployed right now is from v1.0.0 — it has no <code>Settings</code> ' +
            'tab, so it cannot store changes, it only accepts sessions for one child, ' +
            'and it cannot tell the kids apart.<br><br>' +
@@ -489,10 +542,11 @@ function settingsCard(key) {
            s.maxFactor + ' at ' + s.secondsPerProblem + 's, from <code>config.js</code>.' +
            '</div>' +
            '<div class="link" style="margin-top:10px"><b>' + esc(s.name) +
-           '&rsquo;s quiz link</b><br>' + esc(quizUrl) + '</div>';
+           '&rsquo;s quiz link</b><br><a href="' + esc(quizUrl) + '" target="_blank" ' +
+           'rel="noopener">' + esc(quizUrl) + '</a></div>';
   }
 
-  var html = '<h2>' + esc(s.name) + '&rsquo;s settings</h2><div class="settings">';
+  var html = '<div class="settings">';
 
   html += field_('setName', 'Name', 'shown on the quiz screen', s.name, 'text');
   html += field_('setSeconds', 'Seconds per problem',
@@ -502,6 +556,16 @@ function settingsCard(key) {
   html += field_('setMax', 'Largest number', '', s.maxFactor, 'number', 1, 20);
   html += field_('setProblems', 'Problems per session', '', s.problemsPerSession, 'number', 5, 100);
 
+  var opts = '<option value=""' + (s.focus === '' ? ' selected' : '') + '>Mix</option>';
+  for (var v = s.minFactor; v <= s.maxFactor; v++) {
+    opts += '<option value="' + v + '"' + (Number(s.focus) === v ? ' selected' : '') +
+            '>the ' + v + 's</option>';
+  }
+  html += '<div class="field"><label for="setFocus">Practice<small>Mix is every fact ' +
+          'in the range. A single table is easier — good for learning a new one, ' +
+          'not for measuring.</small></label>' +
+          '<select id="setFocus">' + opts + '</select></div>';
+
   if (PIN_REQUIRED) {
     html += field_('setPin', 'Parent PIN', 'required to save changes',
                    localStorage.getItem(PIN_KEY) || '', 'text');
@@ -510,7 +574,8 @@ function settingsCard(key) {
   html += '<button class="save" id="saveBtn">Save ' + esc(s.name) + '&rsquo;s settings</button>';
   html += '<div class="saveMsg" id="saveMsg"></div>';
   html += '<div class="link"><b>' + esc(s.name) + '&rsquo;s quiz link</b><br>' +
-          esc(quizUrl) + '</div>';
+          '<a href="' + esc(quizUrl) + '" target="_blank" rel="noopener">' +
+          esc(quizUrl) + '</a></div>';
   html += '</div>';
   return html;
 }
@@ -523,7 +588,7 @@ function settingsCard(key) {
  * quiz reads its roster from there, so they show up on the next app open.
  */
 function addKidCard() {
-  var html = '<h2>Add a kid</h2><div class="addkid">' +
+  var html = '<div class="addkid">' +
     '<div class="intro">They appear on their phone the next time the app opens. ' +
     'Nothing to install and no code to edit.</div>';
 
@@ -644,7 +709,8 @@ function wireSettings(key) {
       secondsPerProblem: Number(el('setSeconds').value),
       minFactor: Number(el('setMin').value),
       maxFactor: Number(el('setMax').value),
-      problemsPerSession: Number(el('setProblems').value)
+      problemsPerSession: Number(el('setProblems').value),
+      focus: el('setFocus') ? el('setFocus').value : ''
     };
 
     if (!body.name) { msg.className = 'saveMsg bad'; msg.textContent = 'Name cannot be empty.'; return; }
@@ -708,12 +774,13 @@ function render() {
   if (!sessions.length) {
     html += '<div class="empty">No sessions logged for ' + esc(displayName(key)) + ' yet.' +
             '<br><br>Once a round is finished on the quiz app, it shows up here.</div>';
-    html += settingsCard(key);
-    if (!STALE_SCRIPT) html += addKidCard();
+    html += section('settings', esc(displayName(key)) + '&rsquo;s settings', settingsCard(key));
+    if (!STALE_SCRIPT) html += section('addkid', 'Add a kid', addKidCard(), false);
     html += sheetLink();
     el('content').innerHTML = html;
     wireSettings(key);
     wireAddKid();
+    wireSections();
     return;
   }
 
@@ -751,8 +818,9 @@ function render() {
   html += '</div>';
 
   /* ---- sessions per week ---- */
-  html += '<h2>Sessions per week</h2><div class="panel">' + barChart(weeks) +
-          '<div class="cap">Last ' + CONFIG.WEEKS_SHOWN + ' weeks, Monday start.</div></div>';
+  html += section('weeks', 'Sessions per week',
+    '<div class="panel">' + barChart(weeks) +
+    '<div class="cap">Last ' + CONFIG.WEEKS_SHOWN + ' weeks, Monday start.</div></div>');
 
   /* ---- trends ---- */
   var trend = sessions.slice(-CONFIG.TREND_SESSIONS);
@@ -760,29 +828,37 @@ function render() {
     return (s.when.getMonth() + 1) + '/' + s.when.getDate();
   });
 
-  html += '<h2>Accuracy trend</h2><div class="panel">' +
-          lineChart(trend.map(function (s) { return s.accuracy * 100; }), tLabels, {
-            min: 0, max: 100, color: '#31c48d',
-            fmt: function (v) { return Math.round(v) + '%'; }
-          }) +
-          '<div class="cap">Last ' + trend.length + ' sessions.</div></div>';
+  var focusRounds = trend.filter(function (s) { return s.mode !== ''; }).length;
+  var focusNote = focusRounds
+    ? ' ' + focusRounds + ' of these drilled a single table, which is easier — ' +
+      'they are marked in the list below.'
+    : '';
+
+  html += section('accuracy', 'Accuracy trend',
+    '<div class="panel">' +
+    lineChart(trend.map(function (s) { return s.accuracy * 100; }), tLabels, {
+      min: 0, max: 100, color: '#31c48d',
+      fmt: function (v) { return Math.round(v) + '%'; }
+    }) +
+    '<div class="cap">Last ' + trend.length + ' sessions.' + focusNote + '</div></div>');
 
   var allowed = SETTINGS[key] ? SETTINGS[key].secondsPerProblem : null;
-  html += '<h2>Seconds per problem</h2><div class="panel">' +
-          lineChart(trend.map(function (s) { return s.perProblem; }), tLabels, {
-            color: '#f7b955',
-            fmt: function (v) { return v.toFixed(1) + 's'; }
-          }) +
-          '<div class="cap">Lower is faster.' +
-          (allowed ? ' The timer currently allows ' + allowed + 's per problem.' : '') +
-          '</div></div>';
+  html += section('speed', 'Seconds per problem',
+    '<div class="panel">' +
+    lineChart(trend.map(function (s) { return s.perProblem; }), tLabels, {
+      color: '#f7b955',
+      fmt: function (v) { return v.toFixed(1) + 's'; }
+    }) +
+    '<div class="cap">Lower is faster.' +
+    (allowed ? ' The timer currently allows ' + allowed + 's per problem.' : '') +
+    '</div></div>');
 
   /* ---- trouble facts ---- */
   var tf = troubleFacts(sessions);
-  html += '<h2>Trouble facts</h2>';
+  var html2 = '';
 
   if (!tf.repeated.length) {
-    html += '<div class="empty">No fact has been missed in ' + CONFIG.TROUBLE_MIN_SESSIONS +
+    html2 += '<div class="empty">No fact has been missed in ' + CONFIG.TROUBLE_MIN_SESSIONS +
             ' or more of the last ' + tf.windowSize + ' session' +
             (tf.windowSize === 1 ? '' : 's') + '.' +
             (tf.oneOffs.length
@@ -791,7 +867,7 @@ function render() {
               : '') +
             '</div>';
   } else {
-    html += '<div class="trouble">';
+    html2 += '<div class="trouble">';
     tf.repeated.forEach(function (f) {
       var wrongs = Object.keys(f.answers).sort(function (a, b) {
         return f.answers[b] - f.answers[a];
@@ -804,7 +880,7 @@ function render() {
       if (f.timeouts) bits.push('ran out of time ' + f.timeouts + '×');
 
       var hot = f.sessions >= Math.max(3, Math.ceil(tf.windowSize * 0.4));
-      html += '<div class="trow">' +
+      html2 += '<div class="trow">' +
                 '<div class="fact">' + esc(f.key) + '</div>' +
                 '<div class="meta">missed in <em>' + f.sessions + ' of the last ' +
                   tf.windowSize + '</em> sessions' +
@@ -814,16 +890,17 @@ function render() {
                   (f.misses === 1 ? '' : 'es') + '</div>' +
               '</div>';
     });
-    html += '</div>';
+    html2 += '</div>';
     if (tf.oneOffs.length) {
-      html += '<div class="cap" style="padding:10px 4px;color:#9fb0d0;font-size:12px">' +
+      html2 += '<div class="cap" style="padding:10px 4px;color:#9fb0d0;font-size:12px">' +
               tf.oneOffs.length + ' other fact' + (tf.oneOffs.length > 1 ? 's were' : ' was') +
               ' missed in only one session — filtered out as noise.</div>';
     }
   }
+  html += section('trouble', 'Trouble facts', html2);
 
   /* ---- recent sessions ---- */
-  html += '<h2>Recent sessions</h2>';
+  var recentHtml = '';
   sessions.slice(-CONFIG.RECENT_SESSIONS_SHOWN).reverse().forEach(function (s) {
     var cls = s.accuracy >= 0.9 ? 'a' : (s.accuracy >= 0.75 ? 'b' : 'c');
     var when = s.when.toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' }) +
@@ -831,24 +908,28 @@ function render() {
     var missTxt = s.missed.length
       ? s.missed.map(function (m) { return m.a + '×' + m.b; }).join(', ')
       : 'no misses';
+    var mode = s.mode === '' ? '' : ' · <b class="mode">' + esc(s.mode) + '× table</b>';
 
-    html += '<div class="session">' +
+    recentHtml += '<div class="session">' +
               '<div class="when">' + esc(when) +
                 '<small>' + mmss(s.elapsed) + ' · ' + s.perProblem.toFixed(1) +
-                's per problem<br>' + esc(missTxt) + '</small>' +
+                's per problem' + mode + '<br>' + esc(missTxt) + '</small>' +
               '</div>' +
               '<div class="badge ' + cls + '">' + s.score + '/' + s.total + '</div>' +
             '</div>';
   });
+  html += section('recent', 'Recent sessions', recentHtml);
 
   /* ---- settings ---- */
-  html += settingsCard(key);
-  if (!STALE_SCRIPT) html += addKidCard();
-    html += sheetLink();
+  html += section('settings', esc(displayName(key)) + '&rsquo;s settings',
+                  settingsCard(key), false);
+  if (!STALE_SCRIPT) html += section('addkid', 'Add a kid', addKidCard(), false);
+  html += sheetLink();
 
   el('content').innerHTML = html;
   wireSettings(key);
   wireAddKid();
+  wireSections();
 }
 
 el('refreshBtn').addEventListener('click', load);
