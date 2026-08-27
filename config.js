@@ -42,8 +42,8 @@ window.MATH_CONFIG = {
     ellie: {
       name: 'Ellie',
       minFactor: 1,
-      maxFactor: 10,
-      problemsPerSession: 10,
+      maxFactor: 2,
+      problemsPerSession: 1,
       secondsPerProblem: 20
     },
     daniel: {
