@@ -9,7 +9,7 @@
  * board, which meant code landed on the second open - a lag that repeatedly
  * looked like a broken deploy. Do not put the pages back to cache-first.
  */
-const CACHE = 'mathfacts-v11';
+const CACHE = 'mathfacts-v12';
 
 const PRECACHE = [
   './',
