@@ -35,16 +35,19 @@ Steps 1–3 take about ten minutes. Only step 2 really wants a computer.
 
 ### 1. Pick an ntfy topic
 
-A topic is just a name. Anyone who knows it can read your notifications, so make it
-unguessable. Suggested:
+A topic is just a name, and **anyone who knows it can read your notifications**. So
+invent one nobody would guess — a word plus a dozen random characters, e.g. the shape
+`mathfacts-<12 random letters and digits>`.
 
-```
-caleb-math-facts-q7v2rk9xz4
-```
+Do not use any topic printed in this repo, including examples: this repo is public, so
+a topic named here is a topic anyone can subscribe to. Make one up, write it down, and
+keep it out of `config.js` and both HTML files. It belongs **only** in the Apps Script,
+which is private to your Google account.
 
-Change a few characters so it is genuinely yours, then write it down — you need it
-twice below. **Never put this topic in `config.js` or in either HTML file.** It only
-ever belongs in the Apps Script, which is private to your Google account.
+> **Every time you paste a fresh `Code.gs` into the editor, re-enter your topic.** The
+> committed copy carries a placeholder, and pasting replaces your real topic with it.
+> The script now refuses to push while the placeholder is in place, and the dashboard
+> shows a warning, so it fails loudly instead of silently going nowhere.
 
 ### 2. Create the Sheet and the Apps Script
 

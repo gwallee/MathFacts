@@ -16,6 +16,15 @@
  */
 
 // ============================== CONFIG ==============================
+//
+//  >>> RE-ENTER YOUR NTFY TOPIC EVERY TIME YOU PASTE THIS FILE IN. <<<
+//
+//  This copy lives in a public repo, so it ships with a placeholder. Pasting
+//  a fresh copy over your script REPLACES your real topic with that
+//  placeholder, and pushes then go to a world-readable topic whose name is
+//  public. The script refuses to push while the placeholder is in place, and
+//  the dashboard shows a warning, so this fails loudly rather than silently.
+//
 var CONFIG = {
   // Replace with your own unguessable topic inside the Apps Script editor.
   NTFY_TOPIC: 'PUT-YOUR-NTFY-TOPIC-HERE',
@@ -367,7 +376,22 @@ function writeSettings_(settingsObj) {
 
 /* ------------------------------- ntfy ------------------------------- */
 
+var NTFY_PLACEHOLDER = 'PUT-YOUR-NTFY-TOPIC-HERE';
+
+/** False while the committed placeholder is still in place. */
+function topicConfigured_() {
+  var t = String(CONFIG.NTFY_TOPIC || '').trim();
+  return !!t && t !== NTFY_PLACEHOLDER;
+}
+
+
 function notify_(s) {
+  // Never push to the placeholder: it is named in a public repo, so anyone
+  // could subscribe to it. Better to send nothing and flag it.
+  if (!topicConfigured_()) {
+    throw new Error('ntfy topic is still the placeholder - set NTFY_TOPIC');
+  }
+
   var body = 'Finished: ' + s.score + '/' + s.total + ' in ' + mmss_(s.elapsedSeconds) +
              (s.mode === '' ? '' : ' (' + s.mode + 'x table)');
 
@@ -460,6 +484,7 @@ function doGet(e) {
       sessions: sessions,
       settings: readSettings_(),
       pinRequired: !!CONFIG.PARENT_PIN,
+      topicConfigured: topicConfigured_(),
       // Handed to the dashboard so it can link to the Sheet. Deliberately
       // served from here rather than written into config.js, which is public
       // on GitHub — this way the spreadsheet id is not in the repo. Opening

@@ -214,6 +214,7 @@ var ACTIVE = '';       // selected student key
 var PIN_REQUIRED = false;
 var STALE_SCRIPT = false;  // the deployed Apps Script predates the Settings tab
 var SHEET_URL = '';        // handed over by the Apps Script, not stored in the repo
+var TOPIC_OK = true;       // false = the script still has the placeholder topic
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -265,6 +266,8 @@ function load() {
       PIN_REQUIRED = !!data.pinRequired;
       SHEET_URL = data.spreadsheetUrl ||
                   (window.MATH_CONFIG && window.MATH_CONFIG.SHEET_URL) || '';
+      // undefined on an older script; only false is a real "not configured"
+      TOPIC_OK = (data.topicConfigured === undefined) ? true : !!data.topicConfigured;
 
       var keys = studentKeys();
       if (!ACTIVE || keys.indexOf(ACTIVE) === -1) ACTIVE = keys[0] || '';
@@ -769,6 +772,17 @@ function render() {
             'session belongs to, so every round shows up under one name and the ' +
             'settings editor is disabled. See the bottom of this page for the fix.' +
             '</div>';
+  }
+
+  if (!TOPIC_OK) {
+    html += '<div class="err" style="margin-bottom:16px">' +
+            '<b>No notifications are being sent.</b> The Apps Script still has the ' +
+            'placeholder ntfy topic, which happens when a fresh <code>Code.gs</code> ' +
+            'is pasted over it. Pushes are blocked until you set a real one — that ' +
+            'placeholder is named in the public repo, so anyone could read it.<br><br>' +
+            'Fix: Apps Script editor &rarr; set <code>NTFY_TOPIC</code> near the top ' +
+            '&rarr; <b>Deploy &rarr; Manage deployments &rarr; pencil &rarr; New ' +
+            'version</b>.</div>';
   }
 
   if (!sessions.length) {
