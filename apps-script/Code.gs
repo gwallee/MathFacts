@@ -46,8 +46,8 @@ var DEFAULT_STUDENTS = [
     problemsPerSession: 20, secondsPerProblem: 12 },
   { key: 'ellie', name: 'Ellie', minFactor: 1, maxFactor: 10,
     problemsPerSession: 10, secondsPerProblem: 20 },
-  { key: 'daniel', name: 'Daniel', minFactor: 1, maxFactor: 14,
-    problemsPerSession: 20, secondsPerProblem: 10 }
+  { key: 'daniel', name: 'Daniel', minFactor: 2, maxFactor: 12,
+    problemsPerSession: 20, secondsPerProblem: 14 }
 ];
 // ====================================================================
 
