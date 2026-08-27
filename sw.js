@@ -8,7 +8,7 @@
  * background refresh, which means code changes land on the SECOND open.
  * That lag is normal; remember it when testing.
  */
-const CACHE = 'mathfacts-v10';
+const CACHE = 'mathfacts-v11';
 
 const PRECACHE = [
   './',
@@ -76,11 +76,45 @@ self.addEventListener('fetch', (event) => {
 
   // Page loads carry a ?student=... tag, which would otherwise miss the cache
   // and break offline. Cache every navigation under its bare path instead.
+  const isPage = (req.mode === 'navigate') || /\.html$/.test(url.pathname);
   const key = (req.mode === 'navigate')
     ? new Request(url.origin + url.pathname)
     : req;
 
-  // Everything else: cache-first, refresh in the background.
+  // The pages themselves are network-first with a short timeout. Cache-first
+  // meant a code change only ran on the SECOND open, which repeatedly looked
+  // like a broken deploy - a dashboard setting would save fine and the phone
+  // would carry on ignoring it. Online, you now always get the current app;
+  // offline (or on a stalled connection) it falls straight back to the cache.
+  if (isPage) {
+    event.respondWith(
+      new Promise((resolve) => {
+        let settled = false;
+        const done = (res) => { if (!settled) { settled = true; resolve(res); } };
+
+        const timer = setTimeout(() => {
+          caches.match(key).then((hit) => { if (hit) done(hit); });
+        }, 2500);
+
+        fetch(req)
+          .then((res) => {
+            clearTimeout(timer);
+            if (res && res.ok) {
+              const copy = res.clone();
+              caches.open(CACHE).then((c) => c.put(key, copy));
+            }
+            done(res);
+          })
+          .catch(() => {
+            clearTimeout(timer);
+            caches.match(key).then((hit) => done(hit || Response.error()));
+          });
+      })
+    );
+    return;
+  }
+
+  // Everything else (icons, manifests): cache-first, refresh in the background.
   event.respondWith(
     caches.match(key).then((hit) => {
       const net = fetch(req)

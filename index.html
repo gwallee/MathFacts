@@ -65,6 +65,9 @@
   }
   .record b{color:var(--ink);font-weight:800}
   .record .beat{color:var(--progress);font-weight:800}
+  /* So "is this phone actually running the new code?" is answerable at a
+     glance instead of by guesswork. */
+  .ver{margin-top:20px;font-size:11px;color:#3d4a6b;letter-spacing:.04em}
   .compare{margin-top:10px;font-size:16px;font-weight:700;color:var(--muted);min-height:22px}
   .compare.best{color:#ffd76e}
   .compare.up{color:var(--good)}
@@ -162,6 +165,7 @@
   <button class="switch" id="soundBtn">Sound: on</button>
   <button class="switch" id="switchBtn" hidden>Not you? Switch</button>
   <div class="note" id="pendingNote" hidden></div>
+  <div class="ver" id="ver"></div>
 </section>
 
 <!-- ============================ PLAY ============================= -->
@@ -258,6 +262,10 @@ var CONFIG = (function () {
   if (src.SCRIPT_URL) out.SCRIPT_URL = src.SCRIPT_URL;
   return out;
 })();
+
+// Shown small on the start screen. Bump it whenever index.html changes, so a
+// phone running stale cached code is obvious rather than mysterious.
+var APP_VERSION = 'v1.3';
 
 var PENDING_KEY = 'mathfacts_pending_v1';
 var SETTINGS_KEY = 'mathfacts_settings_v1';
@@ -981,6 +989,8 @@ document.addEventListener('visibilitychange', function () {
 });
 
 (function init() {
+  el('ver').textContent = APP_VERSION;
+  paintSoundBtn();
   loadSettings();
   paintPicker();
 
