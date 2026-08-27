@@ -24,12 +24,24 @@ window.MATH_CONFIG = {
   SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyfRXckmyLa3X-2yskiLYY0mdN1k-O3mi579G2AsOMwuLD2cHHw8fbW6I19DfmthMwEUw/exec',
 
 
-  /* --- who practices ---------------------------------------------- */
+  /* ================================================================ */
+  /*  STOP — EDITING THE NUMBERS BELOW DOES NOTHING.                  */
+  /*                                                                  */
+  /*  Once a kid exists in the Sheet, the Sheet is the only thing the */
+  /*  quiz reads. To change a range, a timer or the problem count, or */
+  /*  to add a kid, use the DASHBOARD:                                */
+  /*      https://gwallee.github.io/MathFacts/dashboard.html          */
+  /*  pick their tab, scroll to the bottom, Save. It reaches their    */
+  /*  phone the next time the app opens.                              */
+  /*                                                                  */
+  /*  This block is only a fallback, used by a phone that has never   */
+  /*  reached the network, and to seed the Sheet on the very first    */
+  /*  run. It is deliberately left in step with the Sheet.            */
+  /* ================================================================ */
   /* Each kid gets their own link:                                     */
   /*   .../MathFacts/?student=caleb                                    */
   /*   .../MathFacts/?student=ellie                                    */
   /* Opening the plain URL shows a "who's practicing?" picker.         */
-  /* To add a third kid, add a key here AND on the dashboard.          */
 
   STUDENTS: {
     caleb: {

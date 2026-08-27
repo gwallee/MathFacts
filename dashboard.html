@@ -102,6 +102,9 @@
     font-size:12px;color:var(--muted);line-height:1.6;word-break:break-all;
   }
   .link b{color:var(--ink);font-weight:700}
+  .addkid{background:var(--card);border-radius:16px;padding:16px;border:1px dashed var(--line)}
+  .addkid .intro{font-size:13px;color:var(--muted);line-height:1.55;margin-bottom:6px}
+  .addkid .save{background:var(--good);color:#04211a}
 
   .empty{background:var(--card);border-radius:16px;padding:22px;text-align:center;
          color:var(--muted);font-size:14px;line-height:1.55}
@@ -506,6 +509,107 @@ function settingsCard(key) {
   return html;
 }
 
+/**
+ * Adding a kid used to mean editing config.js, DEFAULT_STUDENTS in the Apps
+ * Script, a manifest and sw.js, then redeploying — and getting any one of them
+ * wrong produced a kid who appeared in the quiz picker and then had every
+ * session refused. Writing straight to the Settings tab is the whole job: the
+ * quiz reads its roster from there, so they show up on the next app open.
+ */
+function addKidCard() {
+  var html = '<h2>Add a kid</h2><div class="addkid">' +
+    '<div class="intro">They appear on their phone the next time the app opens. ' +
+    'Nothing to install and no code to edit.</div>';
+
+  html += field_('newName', 'Name', 'e.g. Sam', '', 'text');
+  html += field_('newSeconds', 'Seconds per problem', '', 12, 'number', 3, 60);
+  html += field_('newMin', 'Smallest number', 'e.g. 3 skips every ×2 fact', 2, 'number', 1, 20);
+  html += field_('newMax', 'Largest number', '', 12, 'number', 1, 20);
+  html += field_('newProblems', 'Problems per session', '', 20, 'number', 5, 100);
+
+  if (PIN_REQUIRED) {
+    html += field_('newPin', 'Parent PIN', '', localStorage.getItem(PIN_KEY) || '', 'text');
+  }
+
+  html += '<button class="save" id="addBtn">Add</button>' +
+          '<div class="saveMsg" id="addMsg"></div></div>';
+  return html;
+}
+
+/** 'Sam O.' -> 'sam'. Must match the key rule the Apps Script enforces. */
+function keyFromName(name) {
+  var key = String(name).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20);
+  return key;
+}
+
+function wireAddKid() {
+  var btn = el('addBtn');
+  if (!btn) return;
+
+  btn.addEventListener('click', function () {
+    var msg = el('addMsg');
+    var name = el('newName').value.trim();
+    var key = keyFromName(name);
+
+    if (!name) { msg.className = 'saveMsg bad'; msg.textContent = 'Give them a name first.'; return; }
+    if (!key) {
+      msg.className = 'saveMsg bad';
+      msg.textContent = 'That name has no letters or numbers to make an id from.';
+      return;
+    }
+    if (SETTINGS[key]) {
+      msg.className = 'saveMsg bad';
+      msg.textContent = 'There is already a kid with the id "' + key + '".';
+      return;
+    }
+
+    var body = {
+      name: name,
+      secondsPerProblem: Number(el('newSeconds').value),
+      minFactor: Number(el('newMin').value),
+      maxFactor: Number(el('newMax').value),
+      problemsPerSession: Number(el('newProblems').value)
+    };
+    if (body.minFactor > body.maxFactor) {
+      msg.className = 'saveMsg bad';
+      msg.textContent = 'The smallest number has to be below the largest.';
+      return;
+    }
+
+    var payload = { type: 'settings', students: {} };
+    payload.students[key] = body;
+    if (PIN_REQUIRED) {
+      payload.pin = el('newPin').value.trim();
+      try { localStorage.setItem(PIN_KEY, payload.pin); } catch (e) {}
+    }
+
+    btn.disabled = true;
+    msg.className = 'saveMsg';
+    msg.textContent = 'Adding…';
+
+    fetch(CONFIG.SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        btn.disabled = false;
+        if (!data || !data.ok) throw new Error((data && data.error) || 'rejected');
+        SETTINGS = data.settings || SETTINGS;
+        ACTIVE = key;
+        renderTabs(studentKeys());
+        render();
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        msg.className = 'saveMsg bad';
+        msg.textContent = 'Could not add them: ' + err.message;
+      });
+  });
+}
+
 function field_(id, label, hint, value, type, min, max) {
   return '<div class="field"><label for="' + id + '">' + esc(label) +
          (hint ? '<small>' + esc(hint) + '</small>' : '') + '</label>' +
@@ -590,8 +694,10 @@ function render() {
     html += '<div class="empty">No sessions logged for ' + esc(displayName(key)) + ' yet.' +
             '<br><br>Once a round is finished on the quiz app, it shows up here.</div>';
     html += settingsCard(key);
+    if (!STALE_SCRIPT) html += addKidCard();
     el('content').innerHTML = html;
     wireSettings(key);
+    wireAddKid();
     return;
   }
 
@@ -721,9 +827,11 @@ function render() {
 
   /* ---- settings ---- */
   html += settingsCard(key);
+  if (!STALE_SCRIPT) html += addKidCard();
 
   el('content').innerHTML = html;
   wireSettings(key);
+  wireAddKid();
 }
 
 el('refreshBtn').addEventListener('click', load);

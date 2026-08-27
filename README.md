@@ -133,20 +133,29 @@ Open the dashboard, tap that kid's tab, scroll to the bottom. You can change:
 | Problems per session | |
 
 Tap **Save**. The change is stored in the Sheet, and the kid's phone picks it up the
-next time the app opens. Starting values are Caleb 3–12 at 8 seconds, Ellie 1–10 at
-12 seconds.
+next time the app opens.
 
-### Adding a third kid
+> **The dashboard is the only place this works.** Editing the numbers in `config.js`
+> does nothing for a kid who already exists in the Sheet — that block is just a
+> fallback for a phone that has never reached the network.
 
-1. Add a key to the `STUDENTS` block in `config.js`.
-2. Copy `ellie.webmanifest` to `<key>.webmanifest` and change the name, short name
-   and `start_url` to match. Without this their home-screen icon still works, it
-   just falls back to remembering the kid rather than carrying it in the URL.
-3. Add the two new filenames to the `PRECACHE` list in `sw.js` and bump `CACHE`.
+### Adding a kid
 
-Commit, then open the dashboard — the new kid appears as a tab with their own link.
-(The Sheet seeds itself from `config.js` only on the very first run, so for a later
-addition you can also add a row to the `Settings` tab by hand.)
+On the dashboard, scroll to the bottom of any kid's tab to **Add a kid**. Fill in the
+name, timer and range, tap Add. That is the whole job — it writes straight to the
+Sheet, no code edit and no redeploy.
+
+They appear on their phone the next time the app opens, and the dashboard shows their
+`?student=` link to text them.
+
+Two optional extras, neither of which blocks anything:
+
+- **A home-screen icon labelled with their name.** Copy `ellie.webmanifest` to
+  `<key>.webmanifest`, change the name, short name and `start_url` to match, add the
+  filename to `PRECACHE` in `sw.js` and bump `CACHE`. Without it their icon still
+  opens as them — the app remembers who it is — the label is just generic.
+- **Working before the phone has ever been online.** Add them to `STUDENTS` in
+  `config.js` too. Only matters for a brand-new phone with no signal.
 
 ### Locking the settings editor (optional)
 

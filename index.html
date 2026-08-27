@@ -341,9 +341,16 @@ function refreshSettings() {
     // Never move the goalposts mid-session — only refresh while waiting.
     if (S && acceptingInput) return;
     applySettings(data.settings);
+
     if (studentKey && STUDENTS[studentKey]) {
       me = STUDENTS[studentKey];
       paintStart();
+    } else if (!studentKey) {
+      // A kid added on the dashboard is not in config.js, so at page load
+      // their ?student= link had nobody to match and fell back to the
+      // picker. Now that the real roster is here, honor the link.
+      var wanted = studentFromUrl() || lastStudent();
+      if (wanted && STUDENTS[wanted]) { chooseStudent(wanted); return; }
     }
     paintPicker();
   }).catch(function () {});
