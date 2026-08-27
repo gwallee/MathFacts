@@ -37,11 +37,17 @@ var CONFIG = {
 
 // Seeded into the Settings tab the first time this script runs. After that
 // the Sheet is the source of truth and you edit on the dashboard, not here.
+//
+// Keep this list in step with STUDENTS in config.js. A kid who is in config.js
+// but NOT here appears in the quiz picker and is then refused by doPost as an
+// unknown student, which is a confusing way to fail.
 var DEFAULT_STUDENTS = [
   { key: 'caleb', name: 'Caleb', minFactor: 3, maxFactor: 12,
-    problemsPerSession: 20, secondsPerProblem: 8 },
+    problemsPerSession: 20, secondsPerProblem: 12 },
   { key: 'ellie', name: 'Ellie', minFactor: 1, maxFactor: 10,
-    problemsPerSession: 20, secondsPerProblem: 12 }
+    problemsPerSession: 10, secondsPerProblem: 20 },
+  { key: 'daniel', name: 'Daniel', minFactor: 1, maxFactor: 14,
+    problemsPerSession: 20, secondsPerProblem: 10 }
 ];
 // ====================================================================
 

@@ -8,7 +8,7 @@
  * background refresh, which means code changes land on the SECOND open.
  * That lag is normal; remember it when testing.
  */
-const CACHE = 'mathfacts-v4';
+const CACHE = 'mathfacts-v5';
 
 const PRECACHE = [
   './',
@@ -18,6 +18,7 @@ const PRECACHE = [
   'manifest.webmanifest',
   'caleb.webmanifest',
   'ellie.webmanifest',
+  'daniel.webmanifest',
   'icon-192.png',
   'icon-512.png',
   'apple-touch-icon.png'
