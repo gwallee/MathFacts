@@ -123,12 +123,17 @@ fallback for the first.
 
 Hard-won detail, all of it seen in one evening:
 
-- **ntfy from Apps Script is intermittent.** It fails as `Address unavailable`
-  after a **~50 second** connection timeout. `UrlFetchApp` has no timeout setting,
-  so never add retries — that multiplies the hang. `doPost` cannot answer until the
-  push returns, and the quiz gives up at 12s, so during an ntfy outage the kid sees
-  "could not send" on a session that stored perfectly. Setting `NOTIFY_EMAIL` is the
-  cheap insurance; `'email'` mode skips the attempt entirely and answers instantly.
+- **The root cause of the flakiness is ntfy's free-tier quota, not the network.**
+  It comes back as `HTTP 429: daily message quota reached`. ntfy.sh rations per IP,
+  and Apps Script sends from Google's shared egress, so the quota is shared with
+  every other Apps Script user hitting ntfy and runs out at unpredictable times.
+  `NTFY_TOKEN` (free ntfy account → Account → Access tokens) attributes the traffic
+  to the account instead of that shared IP, which is the only way to keep real push.
+- **It can also fail as `Address unavailable` after a ~50 second connection
+  timeout.** `UrlFetchApp` has no timeout setting, so never add retries — that
+  multiplies the hang. `doPost` cannot answer until the push returns and the quiz
+  gives up at 12s, so that flavour of failure makes a perfectly stored session show
+  "could not send". A 429 at least fails instantly.
 - **`muteHttpExceptions: true` hides a rejected push.** The status code is now
   checked and non-2xx throws, and `doPost` returns `pushError`. Do not go back to
   swallowing it — a silent push failure cost hours.
@@ -143,6 +148,17 @@ Hard-won detail, all of it seen in one evening:
 - `testNotification` and `testConnectivity` (run by hand from the editor) are the
   fastest way to tell a config fault from a network one. The Executions panel shows
   the real exception; the quiz screen never will.
+
+**Known, accepted, not yet fixed.** Measured about one ntfy failure in three. Brian
+runs `'ntfy'` with `NOTIFY_EMAIL` set, so he always gets the result — but each
+failure still costs the 50s hang, which outlasts the quiz's 12s timeout, so roughly
+one session in three shows the kid "could not send" on a score that stored fine. He
+chose to live with that for now. The fix, if it starts to grate: stop notifying
+inside `doPost` — store the row, reply immediately, add a `Notified` column, and let
+a time-driven trigger (every 5 min, added by hand in the editor) push anything
+outstanding. That also retries failures for free, which suits a flaky route.
+Alternatives considered: `NOTIFY_VIA: 'email'` (reliable, but not a push), or
+swapping ntfy for Telegram / a Discord webhook.
 
 ## CORS, the one non-obvious bit
 

@@ -31,6 +31,14 @@ var CONFIG = {
   NTFY_SERVER: 'https://ntfy.sh',
   NTFY_TITLE: 'Math facts',       // ASCII only - ntfy headers must be ASCII
 
+  // ntfy.sh rations its free tier per IP, and Apps Script sends from Google's
+  // shared egress - so the daily quota is shared with every other Apps Script
+  // user hitting ntfy, and pushes fail with HTTP 429 at unpredictable times.
+  // A free ntfy.sh account plus an access token attributes the traffic to you
+  // instead of that shared IP. Create one at ntfy.sh, generate a token in
+  // Account -> Access tokens, and paste it here. Leave '' to send anonymously.
+  NTFY_TOKEN: '',
+
   // How results reach you:
   //   'ntfy'  - push to ntfy, and fall back to email if that fails
   //   'email' - email only, never touch ntfy
@@ -471,11 +479,15 @@ function notify_(s) {
   // unreachable ntfy takes ~50s to give up - retrying would multiply that,
   // and doPost cannot answer the quiz until this returns.
   try {
+    var headers = { 'Title': title, 'Tags': tags, 'Priority': pct < 80 ? '4' : '3' };
+    var token = String(CONFIG.NTFY_TOKEN || '').trim();
+    if (token) headers.Authorization = 'Bearer ' + token;
+
     var res = UrlFetchApp.fetch(ntfyServer_() + '/' + encodeURIComponent(CONFIG.NTFY_TOPIC), {
       method: 'post',
       contentType: 'text/plain; charset=utf-8',
       payload: body,
-      headers: { 'Title': title, 'Tags': tags, 'Priority': pct < 80 ? '4' : '3' },
+      headers: headers,
       muteHttpExceptions: true
     });
 
