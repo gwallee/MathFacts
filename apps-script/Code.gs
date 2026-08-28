@@ -398,6 +398,28 @@ function writeSettings_(settingsObj) {
 /* ------------------------------- ntfy ------------------------------- */
 
 var NTFY_PLACEHOLDER = 'PUT-YOUR-NTFY-TOPIC-HERE';
+var EMAIL_PLACEHOLDER = 'your-email@wherever.com';
+
+/**
+ * Defaults for anything hand-editing may have deleted. A missing NTFY_SERVER
+ * used to build the URL "http://undefined/<topic>" and fail as a DNS error,
+ * which reads like a network fault rather than a missing line.
+ */
+function ntfyServer_() {
+  var s = String(CONFIG.NTFY_SERVER || 'https://ntfy.sh').trim();
+  return s.replace(/\/+$/, '');
+}
+
+function ntfyTitle_() {
+  return String(CONFIG.NTFY_TITLE || 'Math facts');
+}
+
+/** '' when unset or still the committed example address. */
+function notifyEmail_() {
+  var e = String(CONFIG.NOTIFY_EMAIL || '').trim();
+  if (!e || e === EMAIL_PLACEHOLDER) return '';
+  return (e.indexOf('@') > 0) ? e : '';
+}
 
 /** False while the committed placeholder is still in place. */
 function topicConfigured_() {
@@ -415,7 +437,7 @@ function notify_(s) {
   if (wantsNtfy && !topicConfigured_()) {
     throw new Error('ntfy topic is still the placeholder - set NTFY_TOPIC');
   }
-  if (!wantsNtfy && !CONFIG.NOTIFY_EMAIL) {
+  if (!wantsNtfy && !notifyEmail_()) {
     throw new Error('NOTIFY_VIA is ' + via + ' but NOTIFY_EMAIL is empty');
   }
 
@@ -435,13 +457,13 @@ function notify_(s) {
   var pct = Math.round((100 * s.score) / s.total);
   var tags = pct === 100 ? 'tada' : (pct >= 80 ? 'white_check_mark' : 'warning');
 
-  var title = ascii_(CONFIG.NTFY_TITLE + ' - ' + s.student + ' ' + s.score + '/' + s.total);
+  var title = ascii_(ntfyTitle_() + ' - ' + s.student + ' ' + s.score + '/' + s.total);
   var problem = '';
 
   // 'email' / 'both': send it, and for 'email' we are done - no ntfy attempt,
   // so no 50s hang in front of the quiz's reply.
-  if (CONFIG.NOTIFY_EMAIL && (via === 'email' || via === 'both')) {
-    MailApp.sendEmail(CONFIG.NOTIFY_EMAIL, title, body);
+  if (notifyEmail_() && (via === 'email' || via === 'both')) {
+    MailApp.sendEmail(notifyEmail_(), title, body);
     if (via === 'email') return;
   }
 
@@ -449,7 +471,7 @@ function notify_(s) {
   // unreachable ntfy takes ~50s to give up - retrying would multiply that,
   // and doPost cannot answer the quiz until this returns.
   try {
-    var res = UrlFetchApp.fetch(CONFIG.NTFY_SERVER + '/' + encodeURIComponent(CONFIG.NTFY_TOPIC), {
+    var res = UrlFetchApp.fetch(ntfyServer_() + '/' + encodeURIComponent(CONFIG.NTFY_TOPIC), {
       method: 'post',
       contentType: 'text/plain; charset=utf-8',
       payload: body,
@@ -474,9 +496,9 @@ function notify_(s) {
   // 'ntfy', fall back to email so a result still reaches you.
   if (via === 'both') return;
 
-  if (CONFIG.NOTIFY_EMAIL) {
+  if (notifyEmail_()) {
     try {
-      MailApp.sendEmail(CONFIG.NOTIFY_EMAIL, title, body + '\n\n(ntfy failed: ' + problem + ')');
+      MailApp.sendEmail(notifyEmail_(), title, body + '\n\n(ntfy failed: ' + problem + ')');
       return;
     } catch (mailErr) {
       problem += ' | email fallback also failed: ' +
@@ -509,8 +531,9 @@ function testConnectivity() {
                    '  (' + (new Date().getTime() - started) + 'ms)');
       }
     });
-  Logger.log('NOTIFY_VIA=' + CONFIG.NOTIFY_VIA + '  NOTIFY_EMAIL=' +
-             (CONFIG.NOTIFY_EMAIL ? 'set' : 'EMPTY'));
+  Logger.log('NOTIFY_VIA=' + CONFIG.NOTIFY_VIA +
+             '  NOTIFY_EMAIL=' + (notifyEmail_() ? 'set' : 'EMPTY or still the example address') +
+             '  NTFY_SERVER=' + ntfyServer_());
 }
 
 
