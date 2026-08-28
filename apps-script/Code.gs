@@ -157,13 +157,17 @@ function saveSession_(payload) {
   // A failed push must not make the quiz think the session was lost, so the
   // row is already safely stored before we try to notify.
   var pushed = true;
+  var pushError = '';
   try {
     notify_(s);
   } catch (pushErr) {
     pushed = false;
+    // Surfaced rather than swallowed: a silent push failure has cost hours of
+    // guesswork before. The row is already stored either way.
+    pushError = String(pushErr && pushErr.message ? pushErr.message : pushErr).slice(0, 200);
   }
 
-  return json_({ ok: true, stored: true, pushed: pushed });
+  return json_({ ok: true, stored: true, pushed: pushed, pushError: pushError });
 }
 
 
@@ -408,7 +412,7 @@ function notify_(s) {
   var pct = Math.round((100 * s.score) / s.total);
   var tags = pct === 100 ? 'tada' : (pct >= 80 ? 'white_check_mark' : 'warning');
 
-  UrlFetchApp.fetch(CONFIG.NTFY_SERVER + '/' + encodeURIComponent(CONFIG.NTFY_TOPIC), {
+  var res = UrlFetchApp.fetch(CONFIG.NTFY_SERVER + '/' + encodeURIComponent(CONFIG.NTFY_TOPIC), {
     method: 'post',
     contentType: 'text/plain; charset=utf-8',
     payload: body,
@@ -419,6 +423,14 @@ function notify_(s) {
     },
     muteHttpExceptions: true
   });
+
+  // muteHttpExceptions means a rejected topic returns quietly instead of
+  // throwing, which is how a broken push can look like a working one.
+  var code = res && res.getResponseCode ? res.getResponseCode() : 0;
+  if (code && (code < 200 || code >= 300)) {
+    throw new Error('ntfy returned HTTP ' + code + ': ' +
+                    String(res.getContentText ? res.getContentText() : '').slice(0, 120));
+  }
 }
 
 
