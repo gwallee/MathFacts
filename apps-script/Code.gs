@@ -31,13 +31,22 @@ var CONFIG = {
   NTFY_SERVER: 'https://ntfy.sh',
   NTFY_TITLE: 'Math facts',       // ASCII only - ntfy headers must be ASCII
 
-  // Google's servers cannot always reach ntfy.sh - it fails as "Address
-  // unavailable" after a ~50s connection timeout, which also blows the quiz's
-  // upload timeout and makes a stored session look unsent. Set this to your
-  // email and you get the result that way whenever the push fails. Email goes
-  // out through Google itself, so it is not subject to that route at all.
-  // Leave '' to disable.
-  FALLBACK_EMAIL: '',
+  // How results reach you:
+  //   'ntfy'  - push to ntfy, and fall back to email if that fails
+  //   'email' - email only, never touch ntfy
+  //   'both'  - email every time, and also try ntfy
+  //
+  // Use 'email' if ntfy is unreachable from Google's servers. It fails there
+  // as "Address unavailable" after a ~50s connection timeout, and that hang is
+  // not free: doPost cannot answer the quiz until it finishes, so the kid sees
+  // "could not send" on a session that stored perfectly well. 'email' skips
+  // the attempt entirely and answers immediately.
+  NOTIFY_VIA: 'ntfy',
+
+  // Where 'email' and 'both' send to, and where 'ntfy' falls back to.
+  // Email leaves through Google itself, so it does not depend on the route
+  // that breaks ntfy.
+  NOTIFY_EMAIL: '',
 
   SESSIONS_SHEET: 'Sessions',
   SETTINGS_SHEET: 'Settings',
@@ -398,10 +407,16 @@ function topicConfigured_() {
 
 
 function notify_(s) {
+  var via = String(CONFIG.NOTIFY_VIA || 'ntfy').toLowerCase();
+  var wantsNtfy = (via === 'ntfy' || via === 'both');
+
   // Never push to the placeholder: it is named in a public repo, so anyone
   // could subscribe to it. Better to send nothing and flag it.
-  if (!topicConfigured_()) {
+  if (wantsNtfy && !topicConfigured_()) {
     throw new Error('ntfy topic is still the placeholder - set NTFY_TOPIC');
+  }
+  if (!wantsNtfy && !CONFIG.NOTIFY_EMAIL) {
+    throw new Error('NOTIFY_VIA is ' + via + ' but NOTIFY_EMAIL is empty');
   }
 
   var body = 'Finished: ' + s.score + '/' + s.total + ' in ' + mmss_(s.elapsedSeconds) +
@@ -422,6 +437,13 @@ function notify_(s) {
 
   var title = ascii_(CONFIG.NTFY_TITLE + ' - ' + s.student + ' ' + s.score + '/' + s.total);
   var problem = '';
+
+  // 'email' / 'both': send it, and for 'email' we are done - no ntfy attempt,
+  // so no 50s hang in front of the quiz's reply.
+  if (CONFIG.NOTIFY_EMAIL && (via === 'email' || via === 'both')) {
+    MailApp.sendEmail(CONFIG.NOTIFY_EMAIL, title, body);
+    if (via === 'email') return;
+  }
 
   // Deliberately ONE attempt. UrlFetchApp has no timeout setting, and an
   // unreachable ntfy takes ~50s to give up - retrying would multiply that,
@@ -448,11 +470,13 @@ function notify_(s) {
 
   if (!problem) return;
 
-  // ntfy did not take it. Fall back to email if one is configured, so a
-  // result still reaches you rather than vanishing.
-  if (CONFIG.FALLBACK_EMAIL) {
+  // ntfy did not take it. Under 'both' the email already went out. Under
+  // 'ntfy', fall back to email so a result still reaches you.
+  if (via === 'both') return;
+
+  if (CONFIG.NOTIFY_EMAIL) {
     try {
-      MailApp.sendEmail(CONFIG.FALLBACK_EMAIL, title, body + '\n\n(ntfy failed: ' + problem + ')');
+      MailApp.sendEmail(CONFIG.NOTIFY_EMAIL, title, body + '\n\n(ntfy failed: ' + problem + ')');
       return;
     } catch (mailErr) {
       problem += ' | email fallback also failed: ' +
@@ -461,6 +485,32 @@ function notify_(s) {
   }
 
   throw new Error(problem);
+}
+
+
+/**
+ * Editor > pick testConnectivity > Run, then read the log.
+ *
+ * Tells you whether Apps Script can reach the outside world at all, or just
+ * not ntfy. If example.com succeeds and ntfy.sh does not, ntfy is refusing
+ * Google's servers and NOTIFY_VIA should be 'email'. If everything fails,
+ * outbound requests are blocked for this account and email is the only option.
+ */
+function testConnectivity() {
+  ['https://example.com', 'https://ntfy.sh', CONFIG.NTFY_SERVER + '/' + CONFIG.NTFY_TOPIC]
+    .forEach(function (url) {
+      var started = new Date().getTime();
+      try {
+        var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+        Logger.log(url + '  ->  HTTP ' + res.getResponseCode() +
+                   '  (' + (new Date().getTime() - started) + 'ms)');
+      } catch (e) {
+        Logger.log(url + '  ->  FAILED: ' + (e && e.message ? e.message : e) +
+                   '  (' + (new Date().getTime() - started) + 'ms)');
+      }
+    });
+  Logger.log('NOTIFY_VIA=' + CONFIG.NOTIFY_VIA + '  NOTIFY_EMAIL=' +
+             (CONFIG.NOTIFY_EMAIL ? 'set' : 'EMPTY'));
 }
 
 
