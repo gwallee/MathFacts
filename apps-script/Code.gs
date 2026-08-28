@@ -26,35 +26,36 @@
 //  the dashboard shows a warning, so this fails loudly rather than silently.
 //
 var CONFIG = {
-  // Replace with your own unguessable topic inside the Apps Script editor.
+
+  /* --- THE SIX SETTINGS YOU EDIT. All together on purpose: they used to be
+     separated by long comments, someone added a second copy of two of them
+     further up, and JavaScript silently kept the LAST of each duplicate key -
+     so an 'email' setting was overwritten by the 'ntfy' one below it and the
+     symptom looked like the option being ignored. Edit these in place; never
+     add a second copy anywhere in this object. Explanations are underneath. */
+
   NTFY_TOPIC: 'PUT-YOUR-NTFY-TOPIC-HERE',
   NTFY_SERVER: 'https://ntfy.sh',
   NTFY_TITLE: 'Math facts',       // ASCII only - ntfy headers must be ASCII
+  NTFY_TOKEN: '',                 // free ntfy account -> Account -> Access tokens
+  NOTIFY_VIA: 'ntfy',             // 'ntfy' | 'email' | 'both'
+  NOTIFY_EMAIL: '',               // required for 'email' and 'both'
 
-  // ntfy.sh rations its free tier per IP, and Apps Script sends from Google's
-  // shared egress - so the daily quota is shared with every other Apps Script
-  // user hitting ntfy, and pushes fail with HTTP 429 at unpredictable times.
-  // A free ntfy.sh account plus an access token attributes the traffic to you
-  // instead of that shared IP. Create one at ntfy.sh, generate a token in
-  // Account -> Access tokens, and paste it here. Leave '' to send anonymously.
-  NTFY_TOKEN: '',
+  /* NTFY_TOKEN - ntfy.sh rations its free tier per IP, and Apps Script sends
+     from Google's shared egress, so the daily quota is shared with every other
+     Apps Script user hitting ntfy and pushes fail with HTTP 429 at
+     unpredictable times. A token attributes the traffic to your account
+     instead. Leave '' to send anonymously and take your chances.
 
-  // How results reach you:
-  //   'ntfy'  - push to ntfy, and fall back to email if that fails
-  //   'email' - email only, never touch ntfy
-  //   'both'  - email every time, and also try ntfy
-  //
-  // Use 'email' if ntfy is unreachable from Google's servers. It fails there
-  // as "Address unavailable" after a ~50s connection timeout, and that hang is
-  // not free: doPost cannot answer the quiz until it finishes, so the kid sees
-  // "could not send" on a session that stored perfectly well. 'email' skips
-  // the attempt entirely and answers immediately.
-  NOTIFY_VIA: 'ntfy',
+     NOTIFY_VIA - 'ntfy' pushes and falls back to email on failure; 'email'
+     never touches ntfy; 'both' emails every time and also pushes. Prefer
+     'email' if ntfy keeps failing: a failed push can hang ~50s, doPost cannot
+     answer the quiz until it returns, and the quiz gives up at 12s - so the
+     kid is told the score did not send when it stored perfectly well.
 
-  // Where 'email' and 'both' send to, and where 'ntfy' falls back to.
-  // Email leaves through Google itself, so it does not depend on the route
-  // that breaks ntfy.
-  NOTIFY_EMAIL: '',
+     NOTIFY_EMAIL - email leaves through Google itself, so it does not depend
+     on the route that breaks ntfy. Run testConnectivity() to see which of
+     these values is actually in effect. */
 
   SESSIONS_SHEET: 'Sessions',
   SETTINGS_SHEET: 'Settings',
@@ -782,11 +783,16 @@ function json_(obj) {
 
 /** Editor > pick testNotification > Run. Your phone should buzz. */
 function testNotification() {
+  Logger.log('effective config -> NOTIFY_VIA=' + CONFIG.NOTIFY_VIA +
+             '  NOTIFY_EMAIL=' + (notifyEmail_() || '(none)') +
+             '  NTFY_TOPIC=' + CONFIG.NTFY_TOPIC +
+             '  NTFY_TOKEN=' + (CONFIG.NTFY_TOKEN ? 'set' : 'none'));
   notify_({
     student: 'Caleb',
     score: 18,
     total: 20,
     elapsedSeconds: 161,
+    mode: '',
     missed: [
       { a: 7, b: 8, correct: 56, given: '54', timeout: false },
       { a: 9, b: 6, correct: 54, given: '', timeout: true }
