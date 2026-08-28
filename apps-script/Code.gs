@@ -31,6 +31,14 @@ var CONFIG = {
   NTFY_SERVER: 'https://ntfy.sh',
   NTFY_TITLE: 'Math facts',       // ASCII only - ntfy headers must be ASCII
 
+  // Google's servers cannot always reach ntfy.sh - it fails as "Address
+  // unavailable" after a ~50s connection timeout, which also blows the quiz's
+  // upload timeout and makes a stored session look unsent. Set this to your
+  // email and you get the result that way whenever the push fails. Email goes
+  // out through Google itself, so it is not subject to that route at all.
+  // Leave '' to disable.
+  FALLBACK_EMAIL: '',
+
   SESSIONS_SHEET: 'Sessions',
   SETTINGS_SHEET: 'Settings',
 
@@ -412,25 +420,47 @@ function notify_(s) {
   var pct = Math.round((100 * s.score) / s.total);
   var tags = pct === 100 ? 'tada' : (pct >= 80 ? 'white_check_mark' : 'warning');
 
-  var res = UrlFetchApp.fetch(CONFIG.NTFY_SERVER + '/' + encodeURIComponent(CONFIG.NTFY_TOPIC), {
-    method: 'post',
-    contentType: 'text/plain; charset=utf-8',
-    payload: body,
-    headers: {
-      'Title': ascii_(CONFIG.NTFY_TITLE + ' - ' + s.student + ' ' + s.score + '/' + s.total),
-      'Tags': tags,
-      'Priority': pct < 80 ? '4' : '3'
-    },
-    muteHttpExceptions: true
-  });
+  var title = ascii_(CONFIG.NTFY_TITLE + ' - ' + s.student + ' ' + s.score + '/' + s.total);
+  var problem = '';
 
-  // muteHttpExceptions means a rejected topic returns quietly instead of
-  // throwing, which is how a broken push can look like a working one.
-  var code = res && res.getResponseCode ? res.getResponseCode() : 0;
-  if (code && (code < 200 || code >= 300)) {
-    throw new Error('ntfy returned HTTP ' + code + ': ' +
-                    String(res.getContentText ? res.getContentText() : '').slice(0, 120));
+  // Deliberately ONE attempt. UrlFetchApp has no timeout setting, and an
+  // unreachable ntfy takes ~50s to give up - retrying would multiply that,
+  // and doPost cannot answer the quiz until this returns.
+  try {
+    var res = UrlFetchApp.fetch(CONFIG.NTFY_SERVER + '/' + encodeURIComponent(CONFIG.NTFY_TOPIC), {
+      method: 'post',
+      contentType: 'text/plain; charset=utf-8',
+      payload: body,
+      headers: { 'Title': title, 'Tags': tags, 'Priority': pct < 80 ? '4' : '3' },
+      muteHttpExceptions: true
+    });
+
+    // muteHttpExceptions means a rejected topic returns quietly instead of
+    // throwing, which is how a broken push can look like a working one.
+    var code = res && res.getResponseCode ? res.getResponseCode() : 0;
+    if (code && (code < 200 || code >= 300)) {
+      problem = 'ntfy returned HTTP ' + code + ': ' +
+                String(res.getContentText ? res.getContentText() : '').slice(0, 120);
+    }
+  } catch (err) {
+    problem = String(err && err.message ? err.message : err);
   }
+
+  if (!problem) return;
+
+  // ntfy did not take it. Fall back to email if one is configured, so a
+  // result still reaches you rather than vanishing.
+  if (CONFIG.FALLBACK_EMAIL) {
+    try {
+      MailApp.sendEmail(CONFIG.FALLBACK_EMAIL, title, body + '\n\n(ntfy failed: ' + problem + ')');
+      return;
+    } catch (mailErr) {
+      problem += ' | email fallback also failed: ' +
+                 String(mailErr && mailErr.message ? mailErr.message : mailErr);
+    }
+  }
+
+  throw new Error(problem);
 }
 
 
