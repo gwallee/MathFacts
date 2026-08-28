@@ -115,6 +115,35 @@ SecondsPerProblem | UpdatedAt`
   dashboard. Rewritten wholesale on save, so a partial edit merges against the current
   row rather than blanking the untouched fields.
 
+## Notifications, and how they fail
+
+`NOTIFY_VIA` picks the path: `'ntfy'` (push, email on failure), `'email'` (never
+touches ntfy), `'both'`. `NOTIFY_EMAIL` is the address for the latter two and the
+fallback for the first.
+
+Hard-won detail, all of it seen in one evening:
+
+- **ntfy from Apps Script is intermittent.** It fails as `Address unavailable`
+  after a **~50 second** connection timeout. `UrlFetchApp` has no timeout setting,
+  so never add retries — that multiplies the hang. `doPost` cannot answer until the
+  push returns, and the quiz gives up at 12s, so during an ntfy outage the kid sees
+  "could not send" on a session that stored perfectly. Setting `NOTIFY_EMAIL` is the
+  cheap insurance; `'email'` mode skips the attempt entirely and answers instantly.
+- **`muteHttpExceptions: true` hides a rejected push.** The status code is now
+  checked and non-2xx throws, and `doPost` returns `pushError`. Do not go back to
+  swallowing it — a silent push failure cost hours.
+- **Pasting a fresh `Code.gs` wipes `NTFY_TOPIC` back to the placeholder.** That
+  happened, and sessions went to `PUT-YOUR-NTFY-TOPIC-HERE`, a world-readable topic
+  named in this public repo, until it was spotted. The script now refuses to push to
+  the placeholder and the dashboard shows a red banner. Always re-enter the topic
+  after pasting.
+- **Hand-editing CONFIG deleted `NTFY_SERVER`**, which built `http://undefined/<topic>`
+  and failed as a DNS error. `ntfyServer_()` / `ntfyTitle_()` / `notifyEmail_()` now
+  supply defaults, and the committed example email counts as unset.
+- `testNotification` and `testConnectivity` (run by hand from the editor) are the
+  fastest way to tell a config fault from a network one. The Executions panel shows
+  the real exception; the quiz screen never will.
+
 ## CORS, the one non-obvious bit
 
 Apps Script web apps cannot answer a CORS preflight. The quiz therefore posts with
