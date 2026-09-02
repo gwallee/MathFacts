@@ -78,6 +78,12 @@ window.MATH_CONFIG = {
   FEEDBACK_MS_WRONG: 1700,       // how long the red correction stays up
 
   MAX_ANSWER_DIGITS: 3,
+
+  // 'go' sits next to 9 and 0 on the pad, so a kid reaching for a second digit
+  // taps it by mistake and submits a one-digit answer. A single-digit answer
+  // submitted within this many ms of typing that digit is treated as a
+  // mis-tap and ignored. Raise it if it still happens; 0 disables the guard.
+  MISTAP_MS: 300,
   AVOID_IMMEDIATE_REPEAT: true,  // never ask the identical fact twice in a row
   KEEP_SCREEN_AWAKE: true,       // hold the screen on during a session
   SEND_TIMEOUT_MS: 12000,        // give up on the upload after this many ms

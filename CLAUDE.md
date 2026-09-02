@@ -65,6 +65,19 @@ in or out.
     fallback, then a background `?settings=1` fetch updates both. `refreshSettings()`
     deliberately **no-ops while a problem is on screen** so the rules never change
     mid-session; `S.seconds` is frozen at session start for the same reason.
+  - **Mis-tap guard on `go` (v1.6).** `go` sits directly below 9 and beside 0 in the
+    pad grid, so a kid reaching for a second digit taps it instead and submits a
+    one-digit answer they never meant. `press()` therefore ignores `go` in exactly
+    one case: the answer is a single digit **and** it arrived within
+    `CONFIG.MISTAP_MS` (300ms) of that digit. It never consults the correct answer,
+    so a fast single digit is swallowed even when it is right (3×3=9) — that is what
+    makes it leak nothing and stop it being pressed repeatedly to probe. A *paused*
+    single digit still submits, right or wrong; two or more digits always submit; the
+    timer keeps running, so a swallowed press costs time. `del` clears the window.
+    Do **not** "improve" this into auto-accepting a correct answer: `del` makes that
+    brute-forceable (type, delete, retry, free), and the only non-exploitable version
+    — commit the moment the typed prefix diverges from the answer — is *harsher* than
+    this, since it removes the chance to fix a fat-fingered digit.
   - Countdown is a `requestAnimationFrame` loop against a `performance.now()` deadline
     drawn as an SVG ring; rAF is throttled when the tab is hidden, so backgrounding the
     app mid-problem loses that problem — deliberate, it stops the timer being dodged.
@@ -219,6 +232,12 @@ git push origin main && git push origin main:gh-pages
 - v1.1.1 (2026-08-26, current): per-kid manifests + remembered student, because iOS
   was dropping `?student=` at Add to Home Screen. US spelling throughout — Brian
   flagged "practising"; use *practicing*, *normalize*, *behavior*.
+- v1.6 (2026-09-02, current): mis-tap guard on the `go` key — Brian noticed the kids
+  "sometimes press enter instead of the second digit". He raised auto-accepting a
+  correct answer and worried it would let them type numbers until one worked; it
+  would (see the `index.html` notes), so the timing guard went in instead. He
+  declined, for now, the other half of the fix: swapping `del` and `go` in the pad so
+  the mis-tap lands on a harmless, recoverable key rather than an irreversible one.
 - Originally requested as copy-paste code blocks; Brian corrected that mid-build and
   asked for a real app pushed to GitHub like Palabritas.
 - Brian still has to do the Google/ntfy setup in README steps 1–4 before scores go

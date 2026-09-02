@@ -98,6 +98,13 @@
     min-width:180px;text-align:center;font-size:48px;font-weight:800;
     border-bottom:5px solid var(--pad);padding:2px 14px 8px;min-height:68px;
   }
+  .answer.nudge{animation:nudge .26s ease-in-out}
+  @keyframes nudge{
+    0%,100%{transform:translateX(0)}
+    25%{transform:translateX(-7px)}
+    75%{transform:translateX(7px)}
+  }
+  @media (prefers-reduced-motion:reduce){ .answer.nudge{animation:none} }
   .answer.ok{border-color:var(--good);color:var(--good)}
   .answer.no{border-color:var(--bad);color:var(--bad)}
   .verdict{height:28px;font-size:20px;font-weight:700;color:var(--muted)}
@@ -246,6 +253,7 @@ var DEFAULTS = {
   FEEDBACK_MS_CORRECT: 450,
   FEEDBACK_MS_WRONG: 1700,
   MAX_ANSWER_DIGITS: 3,
+  MISTAP_MS: 300,
   AVOID_IMMEDIATE_REPEAT: true,
   KEEP_SCREEN_AWAKE: true,
   SEND_TIMEOUT_MS: 12000
@@ -265,7 +273,7 @@ var CONFIG = (function () {
 
 // Shown small on the start screen. Bump it whenever index.html changes, so a
 // phone running stale cached code is obvious rather than mysterious.
-var APP_VERSION = 'v1.5';
+var APP_VERSION = 'v1.6';
 
 var PENDING_KEY = 'mathfacts_pending_v1';
 var SETTINGS_KEY = 'mathfacts_settings_v1';
@@ -491,6 +499,9 @@ function blip(freq, dur, peak, type, delay) {
 // speaker, where a pure sine at low volume is easy to miss entirely.
 function playCorrect() { blip(880, 0.11, 0.34, 'triangle'); blip(1318.5, 0.17, 0.30, 'triangle', 0.085); }
 function playWrong()   { blip(233.1, 0.16, 0.26, 'triangle'); blip(185, 0.21, 0.22, 'triangle', 0.10); }
+// Deliberately unlike playCorrect/playWrong: one short, quiet, mid-range tick
+// that reads as "keep going", not as a judgement. Nothing has been answered.
+function playNudge()   { blip(587.3, 0.06, 0.12, 'triangle'); }
 function playFinish() {
   blip(659.3, 0.12, 0.28, 'triangle', 0);
   blip(830.6, 0.12, 0.28, 'triangle', 0.12);
@@ -667,6 +678,7 @@ function startSession() {
     score: 0,
     missed: [],
     typed: '',
+    lastDigitAt: 0,
     deadline: 0,
     startedAt: Date.now()
   };
@@ -680,6 +692,7 @@ function nextProblem() {
 
   var p = S.problems[S.index];
   S.typed = '';
+  S.lastDigitAt = 0;
 
   el('counter').textContent = (S.index + 1) + ' / ' + S.problems.length;
   el('scorePill').textContent = S.score;
@@ -713,20 +726,57 @@ function stopTimer() {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
 }
 
+/**
+ * A mis-tap guard, NOT a change to the rules.
+ *
+ * 'go' sits directly below 9 and directly beside 0 on the pad, so a kid
+ * reaching for a second digit lands on it instead and submits a one-digit
+ * answer they never meant. So 'go' is ignored in exactly one case: the answer
+ * is a single digit AND it followed that digit too fast to have been a
+ * deliberate "I'm done".
+ *
+ * What it deliberately does NOT do:
+ *  - it never looks at the correct answer, so a fast single digit is swallowed
+ *    even when that digit is right (3x3=9). It therefore leaks nothing, and
+ *    cannot be pressed repeatedly to probe for the answer.
+ *  - a paused single digit still goes through, right or wrong, so a real
+ *    one-digit answer or an honest guess is never blocked.
+ *  - two or more digits always submit, unchanged.
+ *  - the timer keeps running. A swallowed press costs time, not nothing.
+ *
+ * 'del' clears the window: having corrected the answer on purpose, the next
+ * 'go' is meant.
+ */
 function press(k) {
   if (!acceptingInput) return;
 
   if (k === 'del') {
     S.typed = S.typed.slice(0, -1);
+    S.lastDigitAt = 0;
   } else if (k === 'go') {
     if (S.typed === '') return;
+    if (S.typed.length === 1 && S.lastDigitAt &&
+        (performance.now() - S.lastDigitAt) < CONFIG.MISTAP_MS) {
+      nudgeAnswer();
+      return;
+    }
     resolveAnswer(false);
     return;
   } else if (S.typed.length < CONFIG.MAX_ANSWER_DIGITS) {
     if (S.typed === '0') S.typed = '';         // no leading zeros
     S.typed += k;
+    S.lastDigitAt = performance.now();
   }
   el('answer').textContent = S.typed;
+}
+
+/** Says "that press did not count, keep typing" without judging the answer. */
+function nudgeAnswer() {
+  playNudge();
+  var a = el('answer');
+  a.classList.remove('nudge');
+  void a.offsetWidth;                          // restart the animation
+  a.classList.add('nudge');
 }
 
 function resolveAnswer(timedOut) {
