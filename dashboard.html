@@ -243,9 +243,51 @@ function scriptSet() {
 
 /* ------------------------------ load ---------------------------- */
 
-function load() {
-  el('updated').textContent = 'Loading…';
+var DATA_KEY = 'mathfacts_dash_data_v1';   // last good reply, for offline viewing
+var SHOWING_SAVED = false;                 // what is on screen came from DATA_KEY
 
+function timeLabel(d) {
+  var sameDay = d.toDateString() === new Date().toDateString();
+  return (sameDay ? '' : d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ') +
+         d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function readSaved() {
+  try {
+    var o = JSON.parse(localStorage.getItem(DATA_KEY) || 'null');
+    return (o && o.data && o.data.ok) ? o : null;
+  } catch (e) { return null; }
+}
+
+function saveData(data) {
+  try { localStorage.setItem(DATA_KEY, JSON.stringify({ at: Date.now(), data: data })); }
+  catch (e) {}   // a full or blocked localStorage only costs the offline copy
+}
+
+function applyData(data) {
+  ALL = normalize(data.sessions || []);
+
+  // An Apps Script older than v1.1.0 has no Settings tab and returns no
+  // settings at all. Fall back to the config.js roster so every kid still
+  // gets a tab, and say why the editor is unavailable rather than just
+  // quietly dropping them.
+  STALE_SCRIPT = !data.settings;
+  SETTINGS = data.settings || {};
+  if (!Object.keys(SETTINGS).length) SETTINGS = fallbackStudents();
+  PIN_REQUIRED = !!data.pinRequired;
+  SHEET_URL = data.spreadsheetUrl ||
+              (window.MATH_CONFIG && window.MATH_CONFIG.SHEET_URL) || '';
+  // undefined on an older script; only false is a real "not configured"
+  TOPIC_OK = (data.topicConfigured === undefined) ? true : !!data.topicConfigured;
+
+  var keys = studentKeys();
+  if (!ACTIVE || keys.indexOf(ACTIVE) === -1) ACTIVE = keys[0] || '';
+
+  renderTabs(keys);
+  render();
+}
+
+function load() {
   if (!scriptSet()) {
     el('content').innerHTML =
       '<div class="err"><b>No data source configured.</b><br>' +
@@ -256,6 +298,17 @@ function load() {
     return;
   }
 
+  // Show the last copy straight away, then replace it. Offline, or with the
+  // script failing, that copy is what stays up instead of an error page.
+  var saved = readSaved();
+  if (saved && !ALL.length) {
+    SHOWING_SAVED = true;
+    applyData(saved.data);
+  }
+  el('updated').textContent = saved
+    ? 'Updating… (showing ' + timeLabel(new Date(saved.at)) + ')'
+    : 'Loading…';
+
   var url = CONFIG.SCRIPT_URL + (CONFIG.SCRIPT_URL.indexOf('?') === -1 ? '?' : '&') +
             'limit=400&t=' + Date.now();
 
@@ -263,31 +316,19 @@ function load() {
     .then(function (r) { return r.json(); })
     .then(function (data) {
       if (!data || !data.ok) throw new Error((data && data.error) || 'bad response');
-
-      ALL = normalize(data.sessions || []);
-
-      // An Apps Script older than v1.1.0 has no Settings tab and returns no
-      // settings at all. Fall back to the config.js roster so every kid still
-      // gets a tab, and say why the editor is unavailable rather than just
-      // quietly dropping them.
-      STALE_SCRIPT = !data.settings;
-      SETTINGS = data.settings || {};
-      if (!Object.keys(SETTINGS).length) SETTINGS = fallbackStudents();
-      PIN_REQUIRED = !!data.pinRequired;
-      SHEET_URL = data.spreadsheetUrl ||
-                  (window.MATH_CONFIG && window.MATH_CONFIG.SHEET_URL) || '';
-      // undefined on an older script; only false is a real "not configured"
-      TOPIC_OK = (data.topicConfigured === undefined) ? true : !!data.topicConfigured;
-
-      var keys = studentKeys();
-      if (!ACTIVE || keys.indexOf(ACTIVE) === -1) ACTIVE = keys[0] || '';
-
-      renderTabs(keys);
-      render();
-      el('updated').textContent =
-        'Updated ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      saveData(data);
+      SHOWING_SAVED = false;
+      applyData(data);
+      el('updated').textContent = 'Updated ' + timeLabel(new Date());
     })
     .catch(function (err) {
+      if (saved) {
+        if (!SHOWING_SAVED) { SHOWING_SAVED = true; applyData(saved.data); }
+        el('updated').innerHTML = '<span style="color:var(--warn)">Could not refresh (' +
+          esc(err.message) + '). Showing saved data from ' +
+          esc(timeLabel(new Date(saved.at))) + '.</span>';
+        return;
+      }
       el('content').innerHTML =
         '<div class="err"><b>Could not load the results.</b><br>' + esc(err.message) +
         '<br><br>Check that the Apps Script web app is deployed with access set to ' +
@@ -590,11 +631,7 @@ function settingsCard(key) {
   html += field_('setMax', 'Largest number', '', s.maxFactor, 'number', 1, 20);
   html += field_('setProblems', 'Problems per session', '', s.problemsPerSession, 'number', 5, 100);
 
-  var opts = '<option value=""' + (s.focus === '' ? ' selected' : '') + '>Mix</option>';
-  for (var v = s.minFactor; v <= s.maxFactor; v++) {
-    opts += '<option value="' + v + '"' + (Number(s.focus) === v ? ' selected' : '') +
-            '>the ' + v + 's</option>';
-  }
+  var opts = focusOptions(s.minFactor, s.maxFactor, s.focus);
   html += '<div class="field"><label for="setFocus">Practice<small>Mix is every fact ' +
           'in the range. A single table is easier — good for learning a new one, ' +
           'not for measuring.</small></label>' +
@@ -620,6 +657,24 @@ function settingsCard(key) {
   }
   html += '</div>';
   return html;
+}
+
+/** Keep the offline copy's roster in step with a save made since it was taken. */
+function rememberSettings(settings) {
+  var o = readSaved();
+  if (!o) return;
+  o.data.settings = settings;
+  try { localStorage.setItem(DATA_KEY, JSON.stringify(o)); } catch (e) {}
+}
+
+/** Practice options for a range, keeping the current choice if it still fits. */
+function focusOptions(minF, maxF, current) {
+  var cur = (current === '' || current === undefined || current === null) ? '' : Number(current);
+  var opts = '<option value=""' + (cur === '' ? ' selected' : '') + '>Mix</option>';
+  for (var v = minF; v <= maxF; v++) {
+    opts += '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>the ' + v + 's</option>';
+  }
+  return opts;
 }
 
 function storedPin() {
@@ -663,6 +718,7 @@ function wireRemove(key) {
       postSettings(payload).then(function (data) {
         SETTINGS = data.settings || SETTINGS;
         delete SETTINGS[key];
+        rememberSettings(SETTINGS);
         var keys = studentKeys();
         // Stay on their tab only if there is history to look at.
         if (!sessionsFor(key).length) ACTIVE = keys[0] || '';
@@ -692,6 +748,7 @@ function wireRemove(key) {
       msg.textContent = 'Adding…';
       postSettings(payload).then(function (data) {
         SETTINGS = data.settings || SETTINGS;
+        rememberSettings(SETTINGS);
         renderTabs(studentKeys());
         render();
       }).catch(function (err) {
@@ -800,6 +857,7 @@ function wireAddKid() {
         btn.disabled = false;
         if (!data || !data.ok) throw new Error((data && data.error) || 'rejected');
         SETTINGS = data.settings || SETTINGS;
+        rememberSettings(SETTINGS);
         ACTIVE = key;
         renderTabs(studentKeys());
         render();
@@ -824,6 +882,17 @@ function field_(id, label, hint, value, type, min, max) {
 function wireSettings(key) {
   var btn = el('saveBtn');
   if (!btn) return;
+
+  // The Practice list offers one table per number in the range, so it has to
+  // follow the range as it is edited, not only after a save.
+  function syncFocus() {
+    var lo = Math.round(Number(el('setMin').value)), hi = Math.round(Number(el('setMax').value));
+    if (!isFinite(lo) || !isFinite(hi) || lo < 1 || hi > 20 || lo > hi) return;
+    var sel = el('setFocus');
+    sel.innerHTML = focusOptions(lo, hi, sel.value);
+  }
+  el('setMin').addEventListener('input', syncFocus);
+  el('setMax').addEventListener('input', syncFocus);
 
   btn.addEventListener('click', function () {
     var msg = el('saveMsg');
@@ -864,10 +933,17 @@ function wireSettings(key) {
         btn.disabled = false;
         if (!data || !data.ok) throw new Error((data && data.error) || 'rejected');
         SETTINGS = data.settings || SETTINGS;
-        msg.className = 'saveMsg ok';
-        msg.textContent = 'Saved. It applies on ' + displayName(key) +
-                          '’s next round — the app picks it up next time it opens.';
+        rememberSettings(SETTINGS);
+        // Rebuild everything: the Practice list, the timer note under the speed
+        // chart and the tab names all depend on what was just saved.
         renderTabs(studentKeys());
+        render();
+        var after = el('saveMsg');
+        if (after) {
+          after.className = 'saveMsg ok';
+          after.textContent = 'Saved. It applies on ' + displayName(key) +
+                              '’s next round — the app picks it up next time it opens.';
+        }
       })
       .catch(function (err) {
         btn.disabled = false;
@@ -1078,6 +1154,12 @@ function render() {
 
 el('refreshBtn').addEventListener('click', load);
 load();
+
+// The quiz registers this too; registering here as well means the dashboard
+// works offline on a phone that has never opened the quiz.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
 </script>
 </body>
 </html>

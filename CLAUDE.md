@@ -109,8 +109,10 @@ in or out.
     return `permanent: true`. `PARENT_PIN` (default `''`) optionally gates settings writes — it works
     precisely because it is checked here and not in the public page source.
   - `testNotification` / `testAppendRow` / `showSettings` are for running by hand.
-- `sw.js` — `CACHE = 'mathfacts-vN'`, **bump N on every deploy touching a cached
-  file** (and `APP_VERSION` in index.html). Pages and `config.js` are network-first
+- `sw.js` — since v1.7 **`APP_VERSION` in index.html is the only number to bump on
+  a deploy.** `CACHE = 'mathfacts-vN'` changes only when sw.js's own caching scheme
+  changes: every successful network fetch overwrites the cached copy, so a release
+  bump bought nothing once the pages went network-first. Pages and `config.js` are network-first
   with a **2.5s cutoff** to the cache (`networkFirst()`); config.js needs it as much as
   the pages, since it is a blocking script in `<head>`. Only `ok` responses are cached,
   and an error response falls back to the cached copy. Icons and manifests are
@@ -218,7 +220,7 @@ git push origin main && git push origin main:gh-pages
   output lines, not the exception.
 - Pages auto-enabled itself the moment `gh-pages` was first pushed; it took about
   40 seconds to go from 404 to 200.
-- Remember the `sw.js` CACHE bump.
+- Bump `APP_VERSION` in index.html (the `sw.js` CACHE bump is no longer needed).
 - Editing the Apps Script requires **Deploy → Manage deployments → New version**, or
   the phones keep running the old code at the same URL.
 
@@ -259,6 +261,13 @@ git push origin main && git push origin main:gh-pages
   settings frozen for the whole round, short-screen keypad, remove/restore a kid on
   the dashboard. Needs the new `Code.gs` pasted and deployed as a new version (the
   quiz and dashboard degrade safely against the old one, except Remove).
+- v1.7 (2026-11-06): personal best breaks accuracy ties on speed (history entries
+  gain `a`, answering seconds; untimed pre-v1.7 entries never win a speed tie and
+  give way to a timed one), "Perfect again!" / "fastest yet" on the score screen;
+  dashboard rebuilds after a save and its Practice list follows the range as typed;
+  dashboard keeps the last good reply in `localStorage['mathfacts_dash_data_v1']`
+  and shows it when offline or the script fails, and registers the SW itself; one
+  version number (see sw.js).
 - Known, not fixed (from the v1.6 review): `SCRIPT_URL` is public in config.js, so
   with `PARENT_PIN` empty anyone can read all sessions and edit settings. Not requested, do not add unless asked: adaptive/weighted problem
   selection, division or other operations, login, per-kid notification topics.

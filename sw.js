@@ -1,15 +1,22 @@
 /* Math Facts service worker.
  *
- * Bump CACHE on every deploy that changes any cached file - that is the
- * only cache-busting mechanism here (same rule as Palabritas).
+ * There is ONE version number to bump on a deploy: APP_VERSION in index.html
+ * (shown small on the start screen). CACHE below is not a release number and
+ * no longer changes on every deploy.
  *
- * config.js and the HTML pages are network-first (with a cache fallback), so
- * a deploy or a settings edit reaches the phones on the very NEXT open. Only
- * icons and manifests are cache-first. It used to be cache-first across the
- * board, which meant code landed on the second open - a lag that repeatedly
- * looked like a broken deploy. Do not put the pages back to cache-first.
+ * Why that is safe now: config.js and the HTML pages are network-first (with a
+ * 2.5s cutoff to the cache), so a deploy reaches the phones on the very NEXT
+ * open, and every successful fetch overwrites the cached copy. Icons and
+ * manifests are cache-first but refreshed in the background, so they land on
+ * the open after. Bumping CACHE was only ever needed when everything was
+ * cache-first. It used to be cache-first across the board, which meant code
+ * landed on the second open - a lag that repeatedly looked like a broken
+ * deploy. Do not put the pages back to cache-first.
+ *
+ * Change CACHE only when THIS file's caching scheme changes (or to throw the
+ * whole cache away). Any edit to this file installs a new worker anyway.
  */
-const CACHE = 'mathfacts-v14';
+const CACHE = 'mathfacts-v15';
 
 const PRECACHE = [
   './',

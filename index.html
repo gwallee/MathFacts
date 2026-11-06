@@ -282,9 +282,10 @@ var CONFIG = (function () {
   return out;
 })();
 
-// Shown small on the start screen. Bump it whenever index.html changes, so a
-// phone running stale cached code is obvious rather than mysterious.
-var APP_VERSION = 'v1.6';
+// Shown small on the start screen. THE version number: bump it on every
+// deploy (sw.js no longer needs a matching bump — see its header), so a phone
+// running stale code is obvious rather than mysterious.
+var APP_VERSION = 'v1.7';
 
 var PENDING_KEY = 'mathfacts_pending_v1';
 var REJECTED_KEY = 'mathfacts_rejected_v1';   // scores the server refused for good
@@ -450,11 +451,40 @@ function pushHistory(key, entry) {
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(all)); } catch (e) {}
 }
 
-/** Best by accuracy, so a change in problem count does not fake a record. */
+/**
+ * Seconds per problem for a history entry, or null. Only entries with `a`
+ * (answering time, v1.7+) count: older ones stored wall-clock time including
+ * the feedback pauses, so they would make any new round look faster.
+ */
+function pace(entry) {
+  return (entry && typeof entry.a === 'number' && entry.n) ? entry.a / entry.n : null;
+}
+
+/**
+ * True if x was meaningfully faster than y: 0.05s a problem, i.e. a second
+ * over a 20-problem round, so timer jitter cannot hand out records.
+ */
+function fasterThan(x, y) {
+  var px = pace(x), py = pace(y);
+  return px !== null && py !== null && px < py - 0.05;
+}
+
+/**
+ * Best by accuracy, so a change in problem count does not fake a record.
+ * A tie on accuracy goes to the faster round — otherwise a kid who gets
+ * 20/20 every time has no record left to chase.
+ */
 function bestOf(list) {
   var best = null;
   for (var i = 0; i < list.length; i++) {
-    if (!best || (list[i].s / list[i].n) > (best.s / best.n)) best = list[i];
+    var e = list[i];
+    if (!best) { best = e; continue; }
+    var r = e.s / e.n, rb = best.s / best.n;
+    // On a tie, a timed round also replaces an untimed (pre-v1.7) one —
+    // otherwise an old untimed record could never be beaten on speed.
+    if (r > rb || (r === rb && (fasterThan(e, best) || (pace(best) === null && pace(e) !== null)))) {
+      best = e;
+    }
   }
   return best;
 }
@@ -616,6 +646,7 @@ function paintStart() {
     rec.innerHTML =
       'Last time <b>' + last.s + '/' + last.n + '</b>' +
       ' &middot; Best <b>' + best.s + '/' + best.n + '</b>' +
+      (best.s === best.n && pace(best) !== null ? ' in <b>' + mmss(best.a) + '</b>' : '') +
       (last.s < last.n ? '<br><span class="beat">Can you beat ' + last.s + '?</span>' : '');
   }
 }
@@ -831,13 +862,29 @@ function finishSession() {
   var past = historyFor(hk);
   var prevBest = bestOf(past);
   var prevLast = past.length ? past[past.length - 1] : null;
-  pushHistory(hk, { t: Date.now(), s: S.score, n: total, e: Math.round(elapsed) });
+  var entry = { t: Date.now(), s: S.score, n: total, e: Math.round(elapsed),
+                a: Math.round(elapsed * 10) / 10 };     // a: answering time, for pace()
+  pushHistory(hk, entry);
 
+  var perfect = total > 0 && S.score === total;
   var cmp = el('compare');
   cmp.className = 'compare';
   if (prevBest && (S.score / total) > (prevBest.s / prevBest.n)) {
     cmp.className = 'compare best';
-    cmp.textContent = '🏆 New best! Beat ' + prevBest.s + '/' + prevBest.n;
+    cmp.textContent = perfect
+      ? '🏆 Perfect — a new best! Beat ' + prevBest.s + '/' + prevBest.n
+      : '🏆 New best! Beat ' + prevBest.s + '/' + prevBest.n;
+  } else if (prevBest && (S.score / total) === (prevBest.s / prevBest.n) && fasterThan(entry, prevBest)) {
+    // Same score as the best, but quicker: that is a record too.
+    cmp.className = 'compare best';
+    cmp.textContent = (perfect ? '🏆 Perfect again, and your fastest yet! ' : '🏆 Your fastest ' +
+      S.score + '/' + total + ' yet! ') + mmss(elapsed) + ', was ' + mmss(prevBest.a);
+  } else if (perfect && prevLast && prevLast.s === prevLast.n) {
+    cmp.className = 'compare up';
+    cmp.textContent = 'Perfect again! 🎉';
+  } else if (perfect) {
+    cmp.className = 'compare up';
+    cmp.textContent = prevLast ? 'Perfect round! 🎉' : 'Perfect first round! 🎉';
   } else if (prevLast) {
     var lastTxt = '(' + prevLast.s + '/' + prevLast.n + ')';
     // Same length round: compare scores. Different length (the dashboard
