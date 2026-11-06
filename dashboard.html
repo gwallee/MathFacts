@@ -40,6 +40,9 @@
     font-size:15px;font-weight:700;padding:10px 20px;
   }
   .tabs button.on{background:var(--accent);color:#04121f}
+  /* Removed from the roster, kept for their history. */
+  .tabs button.gone{background:transparent;border:1px dashed var(--line)}
+  .tabs button.gone.on{background:var(--card);color:var(--ink)}
 
   h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;
      color:var(--muted);margin:26px 0 10px;font-weight:800}
@@ -66,7 +69,8 @@
   .tile{background:var(--card);border-radius:16px;padding:14px}
   .tile b{display:block;font-size:26px;font-weight:800;line-height:1.15}
   .tile span{font-size:12px;color:var(--muted)}
-  .tile .delta{font-size:12px;font-weight:700}
+  .tile span{display:block}
+  .tile .delta{font-size:12px;font-weight:700;margin-top:3px}
   .up{color:var(--good)} .down{color:var(--bad)} .flat{color:var(--muted)}
 
   .panel{background:var(--card);border-radius:16px;padding:14px 12px 8px}
@@ -127,6 +131,12 @@
   .link b{color:var(--ink);font-weight:700}
   .link a{color:var(--accent);font-weight:600;text-decoration:none;word-break:break-all}
   .link a:hover{text-decoration:underline}
+  .remove{
+    margin-top:14px;width:100%;border:1px solid #5a2b2b;border-radius:14px;padding:12px;
+    font-size:15px;font-weight:700;background:transparent;color:#ffb3b3;
+  }
+  .remove:disabled{opacity:.55}
+  .removeNote{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.5}
   .addkid{background:var(--card);border-radius:16px;padding:16px;border:1px dashed var(--line)}
   .addkid .intro{font-size:13px;color:var(--muted);line-height:1.55;margin-bottom:6px}
   .addkid .save{background:var(--good);color:#04211a}
@@ -358,7 +368,7 @@ function renderTabs(keys) {
   keys.forEach(function (k) {
     var b = document.createElement('button');
     b.textContent = displayName(k);
-    if (k === ACTIVE) b.className = 'on';
+    b.className = (k === ACTIVE ? 'on' : '') + (SETTINGS[k] ? '' : ' gone');
     b.addEventListener('click', function () {
       ACTIVE = k;
       renderTabs(keys);
@@ -387,10 +397,22 @@ function troubleFacts(sessions) {
     var seenThisSession = {};
     s.missed.forEach(function (m) {
       var key = factKey(m.a, m.b);
-      if (!map[key]) map[key] = { key: key, sessions: 0, misses: 0, answers: {}, timeouts: 0 };
-      map[key].misses++;
-      if (m.timeout) map[key].timeouts++;
-      else if (m.given) map[key].answers[m.given] = (map[key].answers[m.given] || 0) + 1;
+      if (!map[key]) {
+        map[key] = { key: key, sessions: 0, misses: 0, answers: {}, timeouts: 0,
+                     hadIt: 0, typedLate: {} };
+      }
+      var f = map[key];
+      f.misses++;
+      if (m.timeout) {
+        f.timeouts++;
+        // Since v1.6 a timeout keeps whatever was typed. Older rows have ''.
+        if (m.given !== '' && m.given !== undefined && m.given !== null) {
+          if (Number(m.given) === Number(m.a) * Number(m.b)) f.hadIt++;
+          else f.typedLate[m.given] = (f.typedLate[m.given] || 0) + 1;
+        }
+      } else if (m.given) {
+        f.answers[m.given] = (f.answers[m.given] || 0) + 1;
+      }
       if (!seenThisSession[key]) { map[key].sessions++; seenThisSession[key] = true; }
     });
   });
@@ -453,6 +475,7 @@ function lineChart(values, labels, opts) {
   var pad = (max - min) * 0.12;
   min = (opts.min !== undefined) ? opts.min : min - pad;
   max = (opts.max !== undefined) ? opts.max : max + pad;
+  if (opts.floor !== undefined) min = Math.max(opts.floor, min);   // no "-0.0s"
 
   var x = function (i) { return PL + (i * (W - PL - PR)) / (values.length - 1); };
   var y = function (v) { return PT + (1 - (v - min) / (max - min)) * (H - PT - PB); };
@@ -525,8 +548,16 @@ function barChart(items) {
 function settingsCard(key) {
   var s = SETTINGS[key];
   if (!s) {
-    return '<div class="empty">' + esc(displayName(key)) +
-           ' has sessions but no settings row in the Sheet yet.</div>';
+    if (STALE_SCRIPT) {
+      return '<div class="empty">' + esc(displayName(key)) +
+             ' has sessions but no settings row in the Sheet yet.</div>';
+    }
+    return '<div class="settings"><div class="removeNote" style="margin-top:0">' +
+           esc(displayName(key)) + ' is not on the quiz roster (removed, or never ' +
+           'added). Their past sessions are kept and shown above.</div>' +
+           (PIN_REQUIRED ? field_('setPin', 'Parent PIN', '', storedPin(), 'text') : '') +
+           '<button class="save" id="restoreBtn">Add ' + esc(displayName(key)) +
+           ' back</button><div class="saveMsg" id="saveMsg"></div></div>';
   }
 
   var quizUrl = location.origin + location.pathname.replace(/dashboard\.html$/, '') +
@@ -571,7 +602,7 @@ function settingsCard(key) {
 
   if (PIN_REQUIRED) {
     html += field_('setPin', 'Parent PIN', 'required to save changes',
-                   localStorage.getItem(PIN_KEY) || '', 'text');
+                   storedPin(), 'text');
   }
 
   html += '<button class="save" id="saveBtn">Save ' + esc(s.name) + '&rsquo;s settings</button>';
@@ -579,8 +610,97 @@ function settingsCard(key) {
   html += '<div class="link"><b>' + esc(s.name) + '&rsquo;s quiz link</b><br>' +
           '<a href="' + esc(quizUrl) + '" target="_blank" rel="noopener">' +
           esc(quizUrl) + '</a></div>';
+
+  // The server refuses to remove the last kid, so do not offer it.
+  if (Object.keys(SETTINGS).length > 1) {
+    html += '<button class="remove" id="removeBtn">Remove ' + esc(s.name) + '</button>' +
+            '<div class="removeNote">Takes them off the quiz. Their past sessions stay ' +
+            'here and in the Sheet, and you can add them back.</div>' +
+            '<div class="saveMsg" id="removeMsg"></div>';
+  }
   html += '</div>';
   return html;
+}
+
+function storedPin() {
+  try { return localStorage.getItem(PIN_KEY) || ''; } catch (e) { return ''; }
+}
+
+/** POST a settings-type payload; resolves with the reply, rejects on ok:false. */
+function postSettings(payload) {
+  return fetch(CONFIG.SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) throw new Error((data && data.error) || 'rejected');
+      return data;
+    });
+}
+
+function pinFor(payload) {
+  if (!PIN_REQUIRED || !el('setPin')) return;
+  payload.pin = el('setPin').value.trim();
+  try { localStorage.setItem(PIN_KEY, payload.pin); } catch (e) {}
+}
+
+function wireRemove(key) {
+  var btn = el('removeBtn');
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var name = displayName(key);
+      if (!confirm('Remove ' + name + ' from the quiz?\n\nTheir past sessions are kept. ' +
+                   'A phone set up for ' + name + ' will show the "who\'s practicing?" ' +
+                   'picker next time it opens.')) return;
+      var msg = el('removeMsg');
+      var payload = { type: 'settings', remove: [key] };
+      pinFor(payload);
+      btn.disabled = true;
+      msg.className = 'saveMsg';
+      msg.textContent = 'Removing…';
+      postSettings(payload).then(function (data) {
+        SETTINGS = data.settings || SETTINGS;
+        delete SETTINGS[key];
+        var keys = studentKeys();
+        // Stay on their tab only if there is history to look at.
+        if (!sessionsFor(key).length) ACTIVE = keys[0] || '';
+        renderTabs(keys);
+        render();
+      }).catch(function (err) {
+        btn.disabled = false;
+        msg.className = 'saveMsg bad';
+        msg.textContent = 'Could not remove: ' + err.message +
+          (/missing students/.test(err.message)
+            ? ' — the deployed Apps Script is older than this page; paste the current ' +
+              'Code.gs and deploy a new version.'
+            : '');
+      });
+    });
+  }
+
+  var restore = el('restoreBtn');
+  if (restore) {
+    restore.addEventListener('click', function () {
+      var msg = el('saveMsg');
+      var payload = { type: 'settings', students: {} };
+      payload.students[key] = { name: displayName(key) };
+      pinFor(payload);
+      restore.disabled = true;
+      msg.className = 'saveMsg';
+      msg.textContent = 'Adding…';
+      postSettings(payload).then(function (data) {
+        SETTINGS = data.settings || SETTINGS;
+        renderTabs(studentKeys());
+        render();
+      }).catch(function (err) {
+        restore.disabled = false;
+        msg.className = 'saveMsg bad';
+        msg.textContent = 'Could not add them back: ' + err.message;
+      });
+    });
+  }
 }
 
 /**
@@ -602,7 +722,7 @@ function addKidCard() {
   html += field_('newProblems', 'Problems per session', '', 20, 'number', 5, 100);
 
   if (PIN_REQUIRED) {
-    html += field_('newPin', 'Parent PIN', '', localStorage.getItem(PIN_KEY) || '', 'text');
+    html += field_('newPin', 'Parent PIN', '', storedPin(), 'text');
   }
 
   html += '<button class="save" id="addBtn">Add</button>' +
@@ -793,6 +913,7 @@ function render() {
     html += sheetLink();
     el('content').innerHTML = html;
     wireSettings(key);
+    wireRemove(key);
     wireAddKid();
     wireSections();
     return;
@@ -860,7 +981,7 @@ function render() {
   html += section('speed', 'Seconds per problem',
     '<div class="panel">' +
     lineChart(trend.map(function (s) { return s.perProblem; }), tLabels, {
-      color: '#f7b955',
+      color: '#f7b955', floor: 0,
       fmt: function (v) { return v.toFixed(1) + 's'; }
     }) +
     '<div class="cap">Lower is faster.' +
@@ -891,7 +1012,15 @@ function render() {
       if (wrongs.length) {
         bits.push('said ' + wrongs.map(function (w) { return '<em>' + esc(w) + '</em>'; }).join(', '));
       }
-      if (f.timeouts) bits.push('ran out of time ' + f.timeouts + '×');
+      if (f.timeouts) {
+        var late = [];
+        if (f.hadIt) late.push('had it right but did not press ✓ ' + f.hadIt + '×');
+        var typed = Object.keys(f.typedLate);
+        if (typed.length) {
+          late.push('typed ' + typed.map(function (w) { return '<em>' + esc(w) + '</em>'; }).join(', '));
+        }
+        bits.push('ran out of time ' + f.timeouts + '×' + (late.length ? ' (' + late.join('; ') + ')' : ''));
+      }
 
       var hot = f.sessions >= Math.max(3, Math.ceil(tf.windowSize * 0.4));
       html2 += '<div class="trow">' +
@@ -942,6 +1071,7 @@ function render() {
 
   el('content').innerHTML = html;
   wireSettings(key);
+  wireRemove(key);
   wireAddKid();
   wireSections();
 }

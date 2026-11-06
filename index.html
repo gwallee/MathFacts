@@ -130,6 +130,7 @@
   .miss .fact{font-size:20px;font-weight:800;white-space:nowrap}
   .miss .said{font-size:13px;color:var(--muted);text-align:right}
   .miss .said b{color:var(--bad)}
+  .miss .said b.had{color:var(--good)}
   .perfect{background:var(--card);border-radius:14px;padding:20px;text-align:center;font-size:18px}
   .status{border-radius:14px;padding:14px;font-size:15px;line-height:1.5;margin-top:18px}
   .status.sending{background:#1b2540;color:var(--muted)}
@@ -144,6 +145,23 @@
   .retry{
     margin-top:10px;border:0;border-radius:12px;padding:10px 18px;
     font-size:14px;font-weight:700;background:#5a2b2b;color:#ffdada;
+  }
+
+  /* Short phones (320x568, the first-gen SE): at full size the bottom keypad
+     row - delete, 0 and the check - fell off the bottom of the screen. */
+  @media (max-height:620px){
+    .screen{padding-top:max(8px,env(safe-area-inset-top));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+    .ring{width:58px;height:58px}
+    .ring svg{width:58px;height:58px}
+    .ring .num{font-size:21px}
+    .progress{margin-top:8px}
+    .stage{gap:4px}
+    .problem{font-size:clamp(42px,14vw,64px)}
+    .answer{font-size:38px;min-height:54px;padding-bottom:4px}
+    .verdict{height:24px;font-size:17px}
+    .pad{gap:8px}
+    .key{padding:10px 0;min-height:50px;font-size:26px}
+    .key.del{font-size:21px}
   }
 </style>
 </head>
@@ -248,7 +266,8 @@ var DEFAULTS = {
   MAX_ANSWER_DIGITS: 3,
   AVOID_IMMEDIATE_REPEAT: true,
   KEEP_SCREEN_AWAKE: true,
-  SEND_TIMEOUT_MS: 12000
+  SEND_TIMEOUT_MS: 12000,       // after this, say "still sending" rather than fail
+  SEND_GIVE_UP_MS: 60000        // only now is it actually a failure
 };
 
 var CONFIG = (function () {
@@ -265,9 +284,10 @@ var CONFIG = (function () {
 
 // Shown small on the start screen. Bump it whenever index.html changes, so a
 // phone running stale cached code is obvious rather than mysterious.
-var APP_VERSION = 'v1.5';
+var APP_VERSION = 'v1.6';
 
 var PENDING_KEY = 'mathfacts_pending_v1';
+var REJECTED_KEY = 'mathfacts_rejected_v1';   // scores the server refused for good
 var SETTINGS_KEY = 'mathfacts_settings_v1';
 var WHO_KEY = 'mathfacts_student_v1';
 var HISTORY_KEY = 'mathfacts_history_v1';
@@ -282,6 +302,8 @@ var S = null;                     // live session state
 var rafId = null;
 var wakeLock = null;
 var acceptingInput = false;
+var inSession = false;            // from Start until the score screen - wider than
+                                  // acceptingInput, which is off between problems
 
 function el(id) { return document.getElementById(id); }
 
@@ -364,13 +386,25 @@ function refreshSettings() {
     if (!data || !data.ok || !data.settings || !Object.keys(data.settings).length) return;
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data.settings)); } catch (e) {}
 
-    // Never move the goalposts mid-session — only refresh while waiting.
-    if (S && acceptingInput) return;
+    // Never move the goalposts mid-session — not even in the pause between
+    // problems. The copy just saved is picked up when the round ends.
+    if (inSession) return;
     applySettings(data.settings);
 
     if (studentKey && STUDENTS[studentKey]) {
       me = STUDENTS[studentKey];
       paintStart();
+    } else if (studentKey) {
+      // This kid was removed on the dashboard. Do not leave them on a start
+      // screen whose scores the server will refuse.
+      studentKey = '';
+      me = null;
+      rememberStudent('');
+      paintPicker();
+      var keys = Object.keys(STUDENTS);
+      if (keys.length === 1) chooseStudent(keys[0]);
+      else { try { history.replaceState(null, '', location.pathname); } catch (e) {} show('screen-pick'); }
+      return;
     } else if (!studentKey) {
       // A kid added on the dashboard is not in config.js, so at page load
       // their ?student= link had nobody to match and fell back to the
@@ -668,8 +702,11 @@ function startSession() {
     missed: [],
     typed: '',
     deadline: 0,
+    shownAt: 0,
+    answerMs: 0,                            // time spent answering, pauses excluded
     startedAt: Date.now()
   };
+  inSession = true;
   requestWakeLock();
   show('screen-play');
   nextProblem();
@@ -690,7 +727,8 @@ function nextProblem() {
   el('verdict').textContent = '';
   el('verdict').className = 'verdict';
 
-  S.deadline = performance.now() + S.seconds * 1000;
+  S.shownAt = performance.now();
+  S.deadline = S.shownAt + S.seconds * 1000;
   acceptingInput = true;
   tick();
 }
@@ -734,9 +772,15 @@ function resolveAnswer(timedOut) {
   acceptingInput = false;
   stopTimer();
 
+  // Only the time this problem was on screen counts; the "Yes!" and the red
+  // correction pauses do not, or misses would make the speed look slower.
+  S.answerMs += Math.min(performance.now() - S.shownAt, S.seconds * 1000);
+
   var p = S.problems[S.index];
   var correct = p.a * p.b;
-  var given = timedOut ? '' : S.typed;
+  // Keep what was typed even on a timeout: "had 56 but never pressed the
+  // check" is a very different miss from a blank. It still counts as a miss.
+  var given = S.typed;
   var isRight = !timedOut && Number(given) === correct;
 
   if (isRight) {
@@ -749,11 +793,14 @@ function resolveAnswer(timedOut) {
   } else {
     playWrong();
     S.missed.push({ a: p.a, b: p.b, given: given, timeout: !!timedOut });
-    el('answer').textContent = timedOut ? '—' : given;
+    el('answer').textContent = (timedOut && given === '') ? '—' : given;
     el('answer').className = 'answer no';
     el('verdict').textContent = CONFIG.SHOW_CORRECT_ON_MISS
       ? (p.a + ' × ' + p.b + ' = ' + correct)
       : (timedOut ? 'Out of time' : 'Not quite');
+    if (timedOut && given !== '' && CONFIG.SHOW_CORRECT_ON_MISS) {
+      el('verdict').textContent = 'Out of time — ' + p.a + ' × ' + p.b + ' = ' + correct;
+    }
     el('verdict').className = 'verdict no';
   }
 
@@ -768,9 +815,13 @@ function resolveAnswer(timedOut) {
 function finishSession() {
   stopTimer();
   releaseWakeLock();
+  inSession = false;
   playFinish();
 
-  var elapsed = (Date.now() - S.startedAt) / 1000;
+  // Answering time only. Wall-clock time also counted every feedback pause
+  // (0.45s per right answer, 1.7s per miss), which inflated seconds-per-problem
+  // and made it rise with every miss.
+  var elapsed = S.answerMs / 1000;
   var total = S.problems.length;
   var acc = total ? Math.round((100 * S.score) / total) : 0;
 
@@ -788,12 +839,18 @@ function finishSession() {
     cmp.className = 'compare best';
     cmp.textContent = '🏆 New best! Beat ' + prevBest.s + '/' + prevBest.n;
   } else if (prevLast) {
-    var diff = S.score - prevLast.s;
-    if (diff > 0) {
+    var lastTxt = '(' + prevLast.s + '/' + prevLast.n + ')';
+    // Same length round: compare scores. Different length (the dashboard
+    // changed the problem count): only percentages are comparable.
+    var sameLen = prevLast.n === total;
+    var diff = sameLen ? S.score - prevLast.s : (S.score / total) - (prevLast.s / prevLast.n);
+    if (Math.abs(diff) < 1e-9) {
+      cmp.textContent = 'Same as last time ' + lastTxt;
+    } else if (diff > 0) {
       cmp.className = 'compare up';
-      cmp.textContent = '+' + diff + ' better than last time (' + prevLast.s + '/' + prevLast.n + ')';
-    } else if (diff === 0) {
-      cmp.textContent = 'Same as last time (' + prevLast.s + '/' + prevLast.n + ')';
+      cmp.textContent = sameLen
+        ? '+' + diff + ' better than last time ' + lastTxt
+        : 'Better than last time ' + lastTxt;
     } else {
       cmp.textContent = 'Last time ' + prevLast.s + '/' + prevLast.n;
     }
@@ -817,8 +874,12 @@ function finishSession() {
     el('missedHeading').textContent = 'Missed facts (' + S.missed.length + ')';
     for (var i = 0; i < S.missed.length; i++) {
       var m = S.missed[i];
-      var said = m.timeout ? 'ran out of time'
-               : (m.given === '' ? 'left blank' : 'you said <b>' + m.given + '</b>');
+      var said = m.timeout
+        ? (m.given === '' ? 'ran out of time'
+           : (Number(m.given) === m.a * m.b
+              ? 'had <b class="had">' + esc(m.given) + '</b> but did not press ✓'
+              : 'typed <b>' + esc(m.given) + '</b>, ran out of time'))
+        : (m.given === '' ? 'left blank' : 'you said <b>' + esc(m.given) + '</b>');
       var row = document.createElement('div');
       row.className = 'miss';
       row.innerHTML =
@@ -853,13 +914,33 @@ function setStatus(kind, html) {
   el('retryBtn').hidden = (kind !== 'failed');
 }
 
-function postJson(payload) {
+/**
+ * A refusal the server will repeat however often it is asked (unknown kid,
+ * malformed session). Newer scripts flag it; for an older deployment, match
+ * the validation messages it is known to send.
+ */
+function isPermanentRejection(data) {
+  if (!data || data.ok) return false;
+  if (data.permanent) return true;
+  return /^(unknown student|missing student|bad (total|score|elapsedSeconds)|payload must)/
+    .test(String(data.error || ''));
+}
+
+/**
+ * Resolves with the server's reply. Rejects with err.rejected (the server
+ * answered, but no) and err.permanent (and will never say yes), or a plain
+ * network/timeout error. onSlow fires once if no reply within SEND_TIMEOUT_MS;
+ * the request itself keeps going until SEND_GIVE_UP_MS.
+ */
+function postJson(payload, onSlow) {
   // text/plain keeps this a "simple" cross-origin request, so the browser
   // sends no OPTIONS preflight — an Apps Script web app cannot answer one.
   var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-  var timer = controller
-    ? setTimeout(function () { controller.abort(); }, CONFIG.SEND_TIMEOUT_MS)
+  var giveUp = controller
+    ? setTimeout(function () { controller.abort(); }, CONFIG.SEND_GIVE_UP_MS)
     : null;
+  var slow = onSlow ? setTimeout(onSlow, CONFIG.SEND_TIMEOUT_MS) : null;
+  function clear() { if (giveUp) clearTimeout(giveUp); if (slow) clearTimeout(slow); }
 
   var opts = {
     method: 'POST',
@@ -869,13 +950,26 @@ function postJson(payload) {
   if (controller) opts.signal = controller.signal;
 
   return fetch(CONFIG.SCRIPT_URL, opts)
-    .then(function (res) { if (timer) clearTimeout(timer); return res.json(); })
+    .then(function (res) { return res.json(); })
     .then(function (data) {
-      if (!data || !data.ok) throw new Error((data && data.error) || 'rejected');
+      clear();
+      if (!data || !data.ok) {
+        var err = new Error((data && data.error) || 'rejected');
+        err.rejected = true;
+        err.permanent = isPermanentRejection(data);
+        throw err;
+      }
       return data;
-    })
-    .catch(function (err) { if (timer) clearTimeout(timer); throw err; });
+    }, function (err) {
+      clear();
+      if (err && err.name === 'AbortError') err = new Error('no reply after ' +
+        Math.round(CONFIG.SEND_GIVE_UP_MS / 1000) + 's');
+      throw err;
+    });
 }
+
+var sending = {};                 // timestamp -> true while a POST is in flight
+var onScreen = '';                // timestamp of the score the status box is about
 
 function deliver(payload, isRetry) {
   if (!urlLooksSet()) {
@@ -885,16 +979,40 @@ function deliver(payload, isRetry) {
     return;
   }
 
+  onScreen = payload.timestamp;
   setStatus('sending', isRetry ? 'Trying again…' : 'Sending your score…');
+  sending[payload.timestamp] = true;
+  // A slow reply can land after the kid has finished another round; it must
+  // not overwrite that round's status.
+  function status(kind, html) { if (onScreen === payload.timestamp) setStatus(kind, html); }
 
-  postJson(payload).then(function () {
+  // The score is usually stored within a second; it is the notification after
+  // it that can hang for ~50s. So a slow reply is not a failure yet.
+  postJson(payload, function () {
+    status('sending', 'Still sending… this can take up to a minute. ' +
+      'You can start another round.');
+  }).then(function () {
+    delete sending[payload.timestamp];
     dropPending(payload.timestamp);
-    setStatus('sent', 'Score sent to your parent. ✅');
+    status('sent', 'Score sent to your parent. ✅');
     flushPending();
   }).catch(function (err) {
-    queuePending(payload);
+    delete sending[payload.timestamp];
     var why = (err && err.message) ? String(err.message).slice(0, 80) : 'no reply';
-    setStatus('failed',
+
+    if (err && err.permanent) {
+      // Resending will never work, so do not queue it where it would block
+      // every later score. Keep a copy aside so it is not simply lost.
+      dropPending(payload.timestamp);
+      parkRejected(payload, why);
+      status('failed',
+        'Your score could not be saved.<br><b>Show this screen to a parent.</b>' +
+        '<span class="why">' + esc(payload.studentKey + ': ' + why) + '</span>');
+      return;
+    }
+
+    queuePending(payload);
+    status('failed',
       'Could not send your score right now.<br><b>Show this screen to a parent</b> ' +
       'before you close it. It will send itself next time you open the app on wifi.' +
       '<span class="why">' + esc(payload.studentKey + ': ' + why) + '</span>');
@@ -930,16 +1048,52 @@ function dropPending(timestamp) {
   showPendingNote();
 }
 
+/** Out of the queue for good, but kept on the phone in case it matters. */
+function parkRejected(payload, why) {
+  try {
+    var raw = localStorage.getItem(REJECTED_KEY);
+    var arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr)) arr = [];
+    arr.push({ payload: payload, error: why, at: new Date().toISOString() });
+    localStorage.setItem(REJECTED_KEY, JSON.stringify(arr.slice(-30)));
+  } catch (e) {}
+}
+
+var flushing = false;
+
+/**
+ * Send every queued score, oldest first. A network failure stops the run
+ * (the rest would fail too). A refusal does NOT: a permanent one is set
+ * aside, any other is skipped for now — either way the scores behind it
+ * still go. It used to stop at the first failure of any kind, so one score
+ * the server would never accept blocked everything queued after it.
+ */
 function flushPending() {
-  if (!urlLooksSet()) { showPendingNote(); return; }
-  var arr = readPending();
+  if (!urlLooksSet() || flushing) { showPendingNote(); return; }
+  var arr = readPending().filter(function (p) { return !sending[p.timestamp]; });
   if (!arr.length) { showPendingNote(); return; }
 
-  var next = arr[0];
-  postJson(next).then(function () {
-    dropPending(next.timestamp);
-    flushPending();
-  }).catch(function () { showPendingNote(); });
+  flushing = true;
+  var i = 0;
+  (function next() {
+    if (i >= arr.length) { flushing = false; showPendingNote(); return; }
+    var item = arr[i++];
+    postJson(item).then(function () {
+      dropPending(item.timestamp);
+      next();
+    }).catch(function (err) {
+      if (err && err.permanent) {
+        dropPending(item.timestamp);
+        parkRejected(item, err.message);
+        next();
+      } else if (err && err.rejected) {
+        next();
+      } else {
+        flushing = false;
+        showPendingNote();
+      }
+    });
+  })();
 }
 
 function showPendingNote() {
@@ -956,6 +1110,7 @@ function showPendingNote() {
 
 function requestWakeLock() {
   if (!CONFIG.KEEP_SCREEN_AWAKE || !navigator.wakeLock) return;
+  if (wakeLock && !wakeLock.released) return;
   navigator.wakeLock.request('screen')
     .then(function (l) { wakeLock = l; })
     .catch(function () {});
@@ -977,9 +1132,13 @@ el('pad').addEventListener('click', function (ev) {
 
 document.addEventListener('keydown', function (ev) {
   if (!acceptingInput) return;
-  if (ev.key >= '0' && ev.key <= '9') press(ev.key);
-  else if (ev.key === 'Backspace') press('del');
-  else if (ev.key === 'Enter') press('go');
+  var k = (ev.key >= '0' && ev.key <= '9' && ev.key.length === 1) ? ev.key
+        : ev.key === 'Backspace' ? 'del'
+        : ev.key === 'Enter' ? 'go' : '';
+  if (!k) return;
+  // Otherwise Enter also "clicks" whichever keypad button has focus.
+  ev.preventDefault();
+  press(k);
 });
 
 el('startBtn').addEventListener('click', startSession);
@@ -992,8 +1151,13 @@ el('retryBtn').addEventListener('click', function () {
 });
 
 document.addEventListener('visibilitychange', function () {
-  if (document.visibilityState === 'visible' && !acceptingInput) {
-    wakeAudio();          // iOS suspends the context while backgrounded
+  if (document.visibilityState !== 'visible') return;
+  wakeAudio();            // iOS suspends the context while backgrounded
+  if (inSession) {
+    // The browser drops the screen wake lock whenever the page is hidden and
+    // never gives it back on its own.
+    requestWakeLock();
+  } else {
     flushPending();
     refreshSettings();
   }

@@ -1,5 +1,5 @@
 /**
- * Math Facts logger — Caleb and Ellie
+ * Math Facts logger
  * Google Apps Script web app, bound to the results Spreadsheet.
  *
  *   doPost  <-  the quiz posts a finished session; we validate it, append a
@@ -146,7 +146,9 @@ function doPost(e) {
 function saveSession_(payload) {
   var settings = readSettings_();
   var check = validateSession_(payload, settings);
-  if (!check.ok) return json_(check);
+  // permanent: the phone will get this same answer however often it resends,
+  // so it should stop queueing this session rather than let it block the rest.
+  if (!check.ok) { check.permanent = true; return json_(check); }
   var s = check.session;
 
   var lock = LockService.getScriptLock();
@@ -290,11 +292,28 @@ function saveSettings_(payload) {
   if (CONFIG.PARENT_PIN && String(payload.pin || '') !== String(CONFIG.PARENT_PIN)) {
     return json_({ ok: false, error: 'wrong PIN' });
   }
+
+  var current = readSettings_();
+
+  // {type:'settings', remove:['ellie']} takes a kid off the roster. Their
+  // sessions stay in the Sessions tab, and they do not come back on their own:
+  // DEFAULT_STUDENTS seeds each kid only once (see ensureDefaultStudents_).
+  if (Array.isArray(payload.remove) && payload.remove.length) {
+    var gone = payload.remove.map(function (k) { return String(k).trim().toLowerCase(); });
+    var left = Object.keys(current).filter(function (k) { return gone.indexOf(k) === -1; });
+    if (!left.length) return json_({ ok: false, error: 'cannot remove the last kid' });
+    for (var g = 0; g < gone.length; g++) {
+      if (!current[gone[g]]) return json_({ ok: false, error: 'no kid with the id ' + gone[g] });
+      delete current[gone[g]];
+    }
+    writeSettings_(current);
+    return json_({ ok: true, saved: true, removed: gone, settings: readSettings_() });
+  }
+
   if (!payload.students || typeof payload.students !== 'object') {
     return json_({ ok: false, error: 'missing students' });
   }
 
-  var current = readSettings_();
   var keys = Object.keys(payload.students);
   if (!keys.length) return json_({ ok: false, error: 'no students supplied' });
 
@@ -455,8 +474,11 @@ function notify_(s) {
 
   if (s.missed.length) {
     body += '\nMissed: ' + s.missed.map(function (m) {
-      var said = m.timeout ? 'ran out of time'
-               : (m.given === '' ? 'left blank' : 'said ' + m.given);
+      var said = m.timeout
+        ? (m.given === '' ? 'ran out of time'
+           : (Number(m.given) === m.correct ? 'had ' + m.given + ', did not press check'
+                                            : 'typed ' + m.given + ', ran out of time'))
+        : (m.given === '' ? 'left blank' : 'said ' + m.given);
       return m.a + 'x' + m.b + '=' + m.correct + ' (' + said + ')';
     }).join(', ');
   } else {
@@ -713,6 +735,7 @@ function getSettingsSheet_() {
               s.problemsPerSession, s.secondsPerProblem, now, s.focus || ''];
     });
     sh.getRange(2, 1, seed.length, SETTINGS_HEADERS.length).setValues(seed);
+    markSeeded_(DEFAULT_STUDENTS.map(function (s) { return s.key; }));
     return sh;
   }
 
@@ -723,14 +746,17 @@ function getSettingsSheet_() {
 
 
 /**
- * Add any DEFAULT_STUDENTS missing from an existing Settings tab, leaving
- * every row that is already there alone.
+ * Add any DEFAULT_STUDENTS that have never been seeded, leaving every row that
+ * is already there alone.
  *
  * Without this, seeding only happened when the tab was empty — so a kid added
  * to the script later never reached the Sheet, showed up in the quiz picker
  * anyway (that list comes from config.js), and then had every session refused
- * as an unknown student. That failure is nearly impossible to read from the
- * quiz screen, so it is worth preventing here.
+ * as an unknown student.
+ *
+ * Each kid is seeded ONCE, remembered in Script Properties. It used to re-add
+ * any missing default kid on every request, so removing a kid — from the
+ * dashboard or by deleting the row in the Sheet — never stuck.
  */
 function ensureDefaultStudents_(sh) {
   var lastRow = sh.getLastRow();
@@ -744,7 +770,19 @@ function ensureDefaultStudents_(sh) {
     }
   }
 
-  var missing = DEFAULT_STUDENTS.filter(function (s) { return !existing[s.key]; });
+  var seeded = seededKeys_() || {};
+
+  // A default kid not yet recorded is either already in the Sheet (seeded by
+  // an older version of this script) or about to be seeded now. Either way it
+  // is recorded, and from then on its absence means it was removed on purpose.
+  var missing = DEFAULT_STUDENTS.filter(function (s) {
+    return !existing[s.key] && !seeded[s.key];
+  });
+  var unrecorded = DEFAULT_STUDENTS
+    .map(function (s) { return s.key; })
+    .filter(function (k) { return !seeded[k]; });
+  if (unrecorded.length) markSeeded_(unrecorded);
+
   if (!missing.length) return;
 
   var now = new Date().toISOString();
@@ -753,6 +791,28 @@ function ensureDefaultStudents_(sh) {
             s.problemsPerSession, s.secondsPerProblem, now, s.focus || ''];
   });
   sh.getRange(sh.getLastRow() + 1, 1, rows.length, SETTINGS_HEADERS.length).setValues(rows);
+}
+
+
+var SEEDED_PROP = 'seededStudents';
+
+/** {key: true} for every default kid ever seeded, or null if never tracked. */
+function seededKeys_() {
+  var raw = PropertiesService.getScriptProperties().getProperty(SEEDED_PROP);
+  if (raw === null || raw === undefined) return null;
+  try {
+    var arr = JSON.parse(raw);
+    var out = {};
+    (Array.isArray(arr) ? arr : []).forEach(function (k) { out[k] = true; });
+    return out;
+  } catch (e) { return {}; }
+}
+
+function markSeeded_(keys) {
+  var have = seededKeys_() || {};
+  keys.forEach(function (k) { have[k] = true; });
+  PropertiesService.getScriptProperties()
+    .setProperty(SEEDED_PROP, JSON.stringify(Object.keys(have)));
 }
 
 

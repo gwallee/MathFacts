@@ -1,7 +1,8 @@
 # Math Facts — project handoff
 
-Timed multiplication-facts PWA for Brian's two kids — **Caleb** (10) and **Ellie**
-(younger) — plus a parent dashboard. Sibling project to Palabritas (`C:\Users\brian\Desktop\Spelling`) and
+Timed multiplication-facts PWA for Brian's kids — **Caleb** (10), **Ellie** (younger)
+and **Daniel** — plus a parent dashboard. Kids can be added and removed from the
+dashboard; the roster lives in the Sheet. Sibling project to Palabritas (`C:\Users\brian\Desktop\Spelling`) and
 deliberately follows the same shape: vanilla HTML/CSS/JS, no build step, no
 dependencies, GitHub Pages, Add to Home Screen.
 
@@ -28,7 +29,7 @@ in or out.
 
 - Multiplication only. **Per kid** ranges: Caleb 3–12 (Brian explicitly excluded ×2 —
   "don't need 5 x 2, but I do want 5 x 3" — and capped it at 12, "don't go past 12
-  either"); Ellie 1–10 at 12 seconds.
+  either"); Ellie 1–10 (20s per problem as of v1.6; the Sheet is authoritative).
 - Timeout counts as a miss.
 - **Purely random selection — no adaptive weighting.** Misses are logged for analysis
   on the dashboard, never re-asked in the session. (This is the opposite of Palabritas,
@@ -63,8 +64,26 @@ in or out.
     `manifest.webmanifest` as anything but `./`.
   - Settings resolution: `localStorage['mathfacts_settings_v1']` → `config.js`
     fallback, then a background `?settings=1` fetch updates both. `refreshSettings()`
-    deliberately **no-ops while a problem is on screen** so the rules never change
-    mid-session; `S.seconds` is frozen at session start for the same reason.
+    deliberately **no-ops for the whole round** (`inSession`, Start → score screen —
+    not `acceptingInput`, which is also off in the pause between problems); the copy
+    it saved is used next round. `S.seconds` is frozen at session start too. If the
+    current kid has been removed from the roster, the phone drops to the picker.
+  - **Timing (v1.6):** `ElapsedSeconds` is *answering time* — the sum, per problem,
+    of shown → answered (capped at the timer). The 0.45s/1.7s feedback pauses are
+    excluded; before v1.6 they were counted, which inflated seconds-per-problem and
+    tied it to the miss count. Expect a one-time step down in the dashboard speed
+    chart at v1.6.
+  - **Timeout keeps what was typed (v1.6):** `given` is whatever was on screen, so a
+    timeout with the right answer typed ("had 56, didn't press ✓") is distinguishable
+    from a blank. It still counts as a miss.
+  - **Sending:** `SEND_TIMEOUT_MS` (12s) only switches the message to "Still
+    sending…"; the request is abandoned at `SEND_GIVE_UP_MS` (60s), because the
+    usual cause of a slow reply is the ntfy hang *after* the row is stored.
+    Queue (`mathfacts_pending_v1`): a network failure stops a flush; a refusal does
+    not. A **permanent** refusal (`permanent: true` from the script, or a known
+    validation message from an older one) is moved to `mathfacts_rejected_v1` so it
+    can never block the scores behind it — it used to, forever. The server dedupes
+    on (studentKey, timestamp), so resends are safe.
   - Countdown is a `requestAnimationFrame` loop against a `performance.now()` deadline
     drawn as an SVG ring; rAF is throttled when the tab is hidden, so backgrounding the
     app mid-problem loses that problem — deliberate, it stops the timer being dodged.
@@ -82,12 +101,20 @@ in or out.
     quiz asks for on every open); `?ping=1` is a health check.
   - Sessions are accepted by student **key or display name**, and only for a kid that
     exists in the `Settings` tab. Settings writes are clamped by `LIMITS`, never
-    trusted. `PARENT_PIN` (default `''`) optionally gates settings writes — it works
+    trusted. `{type:'settings', remove:[key]}` removes a kid (refuses the last one);
+    their sessions stay. `DEFAULT_STUDENTS` are seeded **once each**, recorded in the
+    Script Property `seededStudents` — previously any missing default kid was re-added
+    on every request, so removals never stuck. (On the first run of v1.6 a default kid
+    already missing from the Sheet is re-seeded once.) Session validation failures
+    return `permanent: true`. `PARENT_PIN` (default `''`) optionally gates settings writes — it works
     precisely because it is checked here and not in the public page source.
   - `testNotification` / `testAppendRow` / `showSettings` are for running by hand.
 - `sw.js` — `CACHE = 'mathfacts-vN'`, **bump N on every deploy touching a cached
-  file**. `config.js` is network-first (a `SCRIPT_URL` edit lands next open); everything
-  else is cache-first with background refresh (code lands on the *second* open).
+  file** (and `APP_VERSION` in index.html). Pages and `config.js` are network-first
+  with a **2.5s cutoff** to the cache (`networkFirst()`); config.js needs it as much as
+  the pages, since it is a blocking script in `<head>`. Only `ok` responses are cached,
+  and an error response falls back to the cached copy. Icons and manifests are
+  cache-first with background refresh.
   Navigations are cached under their **bare path** — without that, `?student=ellie`
   misses the cache and offline breaks. Cross-origin requests — i.e. the Apps Script
   calls — are never intercepted.
@@ -106,10 +133,13 @@ Accuracy | ElapsedSeconds | AvgSecPerProblem | MissedCount | Missed`
   to `@` so Sheets does not reformat them into locale dates.
 - `StudentKey` is the stable id (`caleb`); `Student` is the display name *at the time
   of that session*, so renaming a kid does not rewrite history.
-- `Missed` is JSON: `[{a, b, correct, given, timeout}]`. `given` is `''` on a timeout.
+- `Missed` is JSON: `[{a, b, correct, given, timeout}]`. On a timeout `given` is what
+  was typed (`''` if nothing; always `''` before v1.6).
+- `Mode` (column L) is `''` for a mixed round or the table drilled (e.g. `7`).
+- `ElapsedSeconds` is answering time from v1.6, wall-clock (incl. pauses) before.
 
 **`Settings`** — `Key | Name | MinFactor | MaxFactor | ProblemsPerSession |
-SecondsPerProblem | UpdatedAt`
+SecondsPerProblem | UpdatedAt | Focus`
 
 - Seeded from `DEFAULT_STUDENTS` in the script on first run, then owned by the
   dashboard. Rewritten wholesale on save, so a partial edit merges against the current
@@ -223,5 +253,12 @@ git push origin main && git push origin main:gh-pages
   asked for a real app pushed to GitHub like Palabritas.
 - Brian still has to do the Google/ntfy setup in README steps 1–4 before scores go
   anywhere; `SCRIPT_URL` in `config.js` is still `''` as of v1.1.0.
-- No known open bugs. Not requested, do not add unless asked: adaptive/weighted problem
+- v1.6 (2026-11-06): review fixes — answering-time speed metric, typed-on-timeout,
+  "still sending" instead of a false failure, queue no longer blocked by a rejected
+  score, config.js cutoff in the SW, wake lock re-acquired after backgrounding,
+  settings frozen for the whole round, short-screen keypad, remove/restore a kid on
+  the dashboard. Needs the new `Code.gs` pasted and deployed as a new version (the
+  quiz and dashboard degrade safely against the old one, except Remove).
+- Known, not fixed (from the v1.6 review): `SCRIPT_URL` is public in config.js, so
+  with `PARENT_PIN` empty anyone can read all sessions and edit settings. Not requested, do not add unless asked: adaptive/weighted problem
   selection, division or other operations, login, per-kid notification topics.

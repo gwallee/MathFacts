@@ -9,7 +9,7 @@
  * board, which meant code landed on the second open - a lag that repeatedly
  * looked like a broken deploy. Do not put the pages back to cache-first.
  */
-const CACHE = 'mathfacts-v13';
+const CACHE = 'mathfacts-v14';
 
 const PRECACHE = [
   './',
@@ -62,16 +62,12 @@ self.addEventListener('fetch', (event) => {
   // no-store matters — GitHub Pages serves config.js with max-age=600, and
   // without this the browser's own HTTP cache can hand back a copy up to ten
   // minutes stale, which is long enough to look like a broken deploy.
+  //
+  // It gets the same 2.5s cutoff as the pages. config.js is a blocking
+  // <script> in <head>, so on a stalled connection with no cutoff the page
+  // stayed blank until the request finally failed — tens of seconds.
   if (url.pathname.endsWith('/config.js')) {
-    event.respondWith(
-      fetch(new Request(req.url, { cache: 'no-store' }))
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
-          return res;
-        })
-        .catch(() => caches.match(req))
-    );
+    event.respondWith(networkFirst(new Request(req.url, { cache: 'no-store' }), req));
     return;
   }
 
@@ -88,30 +84,7 @@ self.addEventListener('fetch', (event) => {
   // would carry on ignoring it. Online, you now always get the current app;
   // offline (or on a stalled connection) it falls straight back to the cache.
   if (isPage) {
-    event.respondWith(
-      new Promise((resolve) => {
-        let settled = false;
-        const done = (res) => { if (!settled) { settled = true; resolve(res); } };
-
-        const timer = setTimeout(() => {
-          caches.match(key).then((hit) => { if (hit) done(hit); });
-        }, 2500);
-
-        fetch(req)
-          .then((res) => {
-            clearTimeout(timer);
-            if (res && res.ok) {
-              const copy = res.clone();
-              caches.open(CACHE).then((c) => c.put(key, copy));
-            }
-            done(res);
-          })
-          .catch(() => {
-            clearTimeout(timer);
-            caches.match(key).then((hit) => done(hit || Response.error()));
-          });
-      })
-    );
+    event.respondWith(networkFirst(req, key));
     return;
   }
 
@@ -131,3 +104,35 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+/**
+ * Network first, but give up on a slow network after 2.5s and use the cache.
+ * Only a successful response is cached, and an error response (a 404 mid-
+ * deploy, a 500) falls back to the cached copy rather than replacing it.
+ */
+function networkFirst(netReq, key) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (res) => { if (!settled) { settled = true; resolve(res); } };
+
+    const timer = setTimeout(() => {
+      caches.match(key).then((hit) => { if (hit) done(hit); });
+    }, 2500);
+
+    fetch(netReq)
+      .then((res) => {
+        clearTimeout(timer);
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(key, copy));
+          done(res);
+        } else {
+          caches.match(key).then((hit) => done(hit || res));
+        }
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        caches.match(key).then((hit) => done(hit || Response.error()));
+      });
+  });
+}
